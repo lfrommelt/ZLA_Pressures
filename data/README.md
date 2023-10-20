@@ -16,4 +16,4 @@ The overall dataset is Zipf distributed. Frequency ranks are not assigned wrt. s
 
 ## todo: Global (ordered) Zipf
 Wrt. frequency it should be:
-$[0,0,0] \lt [0,0,1] \lt [0,1,0] \lt ... [3,3,2] \lt [3,3,3]$
+$[0,0,0] \gt [0,0,1] \gt [0,1,0] \gt ... [3,3,2] \gt [3,3,3]$
