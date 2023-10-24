@@ -123,7 +123,7 @@ class Dataset:
         frequency=sorted(dataset_count.values(), reverse=True)
 
         if explicit:
-                    plt.plot(sorted(dataset_count.keys(), key=lambda x: dataset_count[x], reverse=True), frequency)
+            plt.plot(sorted(dataset_count.keys(), key=lambda x: dataset_count[x], reverse=True), frequency)
         else:
             plt.plot(np.arange(1,len(frequency)+1), frequency)
             
