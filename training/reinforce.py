@@ -187,3 +187,113 @@ class REINFORCE:
         self.updatetime+=time.time()-ut
                 
         self.n_steps+=1
+        
+        
+class REINFORCEGS:
+    """
+    Extremely specific REINFORCE implementation, so far entails environment and everything and requires gs-agents
+    """
+    
+    def __init__(self, dataset, agent, trainset, lr=1e-2, device="cpu", baseline=Baseline(), logging=[], n_steps=0, verbosity=-1, eval_steps=-1):
+        """
+        args
+        ----------
+            dataset : np.array(shape=(n_data, n_attributes), dtype=attribute_domain)
+                data
+            sender : SRPolicyNet
+                sender
+            receiver : SRPolicyNet
+                receiver
+            trainset : array
+                mask for dataset
+        kwargs
+        ----------
+            verbosity : int
+                if < 0: no; else: each indicted epoch
+            others only for continuing training, can be ignored/use default otherwise
+        """
+        self.dataset=dataset
+        self.agent=agent
+        self.trainset=trainset
+        self.device=device
+        self.agenttime=0
+        self.losstime=0
+        self.backtime=0
+        self.updatetime=0
+        self.n_steps=n_steps
+        self.logging_steps=0
+        self.alphabet_size=agent.message_shape[1]
+        self.message_length=agent.message_shape[0]
+        self.n_attributes=len(dataset[0])
+        self.n_values=dataset.max()+1#we assume that the domains of all attributes have the same size
+        self.verbosity=verbosity
+        self.eval_steps=eval_steps
+        self.logging=[]
+        self.lr=lr
+        self.optimizer=torch.optim.Adam(agent.parameters(), lr=self.lr)
+        self.baseline=baseline
+        
+        
+    def step(self, level):
+        """
+        Does a single reinforce step. Implementation includes environment and everything.
+
+
+        Parameters
+        ----------
+            n_attributes : int
+                amount of attributes per datum
+            n_values : int
+                all attributes have the same domain, i.e. arange(n_values)
+            distribution : str
+                flag for the distribution type, kinda ugly but that way accesible as param of the constructor, also see respective methods
+            distribution_param : float
+                a parameter of the Zipf-Mandelbrot law
+            data_size_scale : float
+                see _create_dataset functions for details
+
+        """
+        # time of individual steps will be logged for debugging
+        at=time.time()
+
+        #transform datum into state for receiver (could be done beforehand for efficiency reasons)
+        state=torch.from_numpy(one_hot(self.dataset[level],self.n_values).flatten())
+        state=state.type(torch.float).to(self.device)
+        
+        #likelihoods of receiver actions
+        action=self.agent(state)
+        message=self.agent.message.copy()#maybe we will need it
+        
+        #sample action
+        answer=[np.random.choice(np.arange(self.n_values), p=probs) for probs in action.detach().cpu().numpy()]
+
+        self.agenttime+=time.time()-at
+        lt=time.time()
+        
+        # rewards are given per each correct one
+        reward=sum([1.0 if answer[i]==self.dataset[level][i] else -1.0/self.n_attributes for i in range(len(answer))])#why are python list operators not vectorized to begin with?
+
+        self.logging.append(reward)
+        
+        #reward is averaged, baseline gets updated automatically when called
+        reward=self.baseline(reward)
+
+        loss=sum([(-torch.log(action[i,answer[i]]) * reward) for i in range(len(answer))])
+
+
+        self.losstime+=time.time()-lt
+        bt=time.time()
+        
+        #reset optimizer and calculate gradients/weight upates
+        self.optimizer.zero_grad()
+        loss.backward()
+        
+        self.backtime+=time.time()-bt
+
+
+        ut=time.time()
+        #apply updates (no batching)
+        self.optimizer.step()
+        self.updatetime+=time.time()-ut
+                
+        self.n_steps+=1
