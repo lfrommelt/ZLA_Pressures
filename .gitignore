@@ -1,3 +1,6 @@
 *ipynb*
 *.pdf
 *__pycache__*
+.idea
+.json
+.pt
