@@ -3,7 +3,10 @@ Implementation of project work for AMMAC
 
 # Next Steps
 - fixed length setting: check if sparse rewards (reward iff ALL output values match) is better
-- refine fixed length setting ("no communication" can be used for conveying information by positional encoding, shuffling message should get rid of that problem, but probably requires completely new hyperparams)
+- refine fixed length setting
+	- test for alphabet size from paper
+	- we need 100% (avg reward=3.0), maybe first try sparse rewards
+	- "no communication" can be used for conveying information by positional encoding, shuffling message should get rid of that problem, but probably requires completely new hyperparams
 - implement mixed length setting
 	- RNNs for generating message as well as "reading" it
 	- check if gumbel softmax is possible
