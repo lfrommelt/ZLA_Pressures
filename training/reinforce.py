@@ -265,7 +265,15 @@ class REINFORCEGS:
         message=self.agent.message.copy()#maybe we will need it
         
         #sample action
-        answer=[np.random.choice(np.arange(self.n_values), p=probs) for probs in action.detach().cpu().numpy()]
+        try:
+            answer=[np.random.choice(np.arange(self.n_values), p=probs) for probs in action.detach().cpu().numpy()]
+        
+        except ValueError as e:
+            print("action:", action)
+            print("datum:", self.dataset[level])
+            print("state:", state)
+            print(list(self.agent.named_parameters()))
+            raise e
 
         self.agenttime+=time.time()-at
         lt=time.time()

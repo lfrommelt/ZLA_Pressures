@@ -17,19 +17,35 @@ class GSPolicyNet(torch.nn.Module):
         self.relu2 = torch.nn.ReLU()#could we recycle relu1?
         self.receiver2 = torch.nn.Linear(20, np.prod(out_shape))
         self.softmax = torch.nn.Softmax(dim=-1)
+        self.message = np.zeros(message_shape[0])
     
     def forward(self, x):
-        x = self.sender1(x)
-        x = self.relu1(x)
-        x = self.sender2(x)
+        x1 = self.sender1(x)
+        x2 = self.relu1(x1)
+        x3 = self.sender2(x2)
         #message = self.gs(x.view((-1,*self.message_shape)))
-        message = torch.nn.functional.gumbel_softmax(x.view((-1,*self.message_shape)), tau=1, hard=True, eps=1e-10, dim=-1)
+        message = torch.nn.functional.gumbel_softmax(x3.view((-1,*self.message_shape)), tau=1, hard=True, eps=1e-10, dim=-1)
+        
+        nans=0
+        '''
+        There was a chance of around 1:1M - 2:1M for any testtensor that crashed training to produce a nan, probably because of sampling a low prob value.
+        Solution: we simply resample. This introduces a bias (o
+        '''
+        while any(torch.isnan(message.flatten())):
+            nans+=1
+            message = torch.nn.functional.gumbel_softmax(x3.view((-1,*self.message_shape)), tau=1, hard=True, eps=1e-10, dim=-1)
+            print(f"Warning: nan encountered!{nans}")
+            if nans > 100:
+                print("latents",x1,x2,x3,message,self.message,x4,x5,x6,x7,sep="\n")
+                break#will lead to error, but rightly so
+        
         self.message = np.argmax(message.cpu().detach().numpy(), axis=-1)
-        x = self.receiver1(message.flatten(start_dim=-2))
-        x = self.relu2(x)
-        x = self.receiver2(x)
-        x = self.softmax(x.view(self.out_shape))#why even use RL at all? We could just use gs for the receiver output as well...
-        return x
+        x4 = self.receiver1(message.flatten(start_dim=-2))
+        x5 = self.relu2(x4)
+        x6 = self.receiver2(x5)
+        x7 = self.softmax(x6.view(self.out_shape))#why even use RL at all? We could just use gs for the receiver output as well...
+
+        return x7
     
 class SRPolicyNet(torch.nn.Module):
     '''
