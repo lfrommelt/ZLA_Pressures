@@ -5,8 +5,9 @@ import numpy as np
 class GSPolicyNet(torch.nn.Module):
     #todo: implement
         
-    def __init__(self, in_shape, message_shape, out_shape):
+    def __init__(self, in_shape, message_shape, out_shape, device="cpu"):
         super().__init__()
+        self.torch_device=device
         self.message_shape=message_shape#lets use agent as variable dump for a sec
         self.out_shape=out_shape
         self.sender1 = torch.nn.Linear(in_shape, 20)

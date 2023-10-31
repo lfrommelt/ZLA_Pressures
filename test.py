@@ -7,7 +7,7 @@ import re
 import json
 
 from evaluation.reference_distributions import OptimalCoding
-from data.data import Dataset
+from data.data import Dataloader
 from training.agents import SRPolicyNet, GSPolicyNet#will happen in training script
 from training.reinforce import REINFORCE, Baseline, REINFORCEGS
 
@@ -23,49 +23,53 @@ def test_data():
     dset.plot(explicit=True)'''
 
 LEARNING_RATE=1e-4#1e-2#good results so far
-ALPHABET_SIZE=11
-N_EPOCHS=5000
+ALPHABET_SIZE=40
+N_EPOCHS=2000
 N_TRAINSET=1000#not implemented
 N_TESTSET=100#not implemented
-EVAL_STEP=500#00
+EVAL_STEP=6000#00#00
 N_DISTRACTORS=-1
 N_ATTRIBUTES=3
-MESSAGE_LENGTH=5
+MESSAGE_LENGTH=30
 N_VALUES=4
 VERBOSE=EVAL_STEP
-DEVICE="cpu"#"cuda"
+DEVICE="cpu"#"cuda"#"cuda"
+N_STEPS=60000
 
-for LEARNING_RATE in [1e-4, 1e-5]:
-    dset = Dataset(N_ATTRIBUTES, N_VALUES, distribution = "local_values", data_size_scale=10)
+dataloader = Dataloader(N_ATTRIBUTES, N_VALUES)
 
-    #should become a function `training()` that is parameterized with the hyperparameters
-    '''
-    sender_policy=SRPolicyNet(N_ATTRIBUTES*N_VALUES,(MESSAGE_LENGTH,ALPHABET_SIZE),device=DEVICE).to(DEVICE)
-    receiver_policy=SRPolicyNet(ALPHABET_SIZE*MESSAGE_LENGTH+N_ATTRIBUTES*N_VALUES*(N_DISTRACTORS+1),(1,N_DISTRACTORS+1),device=DEVICE).to(DEVICE)
-    '''
-
-    agent = GSPolicyNet(N_ATTRIBUTES*N_VALUES, (MESSAGE_LENGTH, ALPHABET_SIZE), (N_ATTRIBUTES,N_VALUES)).to(DEVICE)
+#should become a function `training()` that is parameterized with the hyperparameters
+'''
+sender_policy=SRPolicyNet(N_ATTRIBUTES*N_VALUES,(MESSAGE_LENGTH,ALPHABET_SIZE),device=DEVICE).to(DEVICE)
+receiver_policy=SRPolicyNet(ALPHABET_SIZE*MESSAGE_LENGTH+N_ATTRIBUTES*N_VALUES*(N_DISTRACTORS+1),(1,N_DISTRACTORS+1),device=DEVICE).to(DEVICE)
+'''
+for LEARNING_RATE in [1e-3,1e-3]:
+    agent = GSPolicyNet(N_ATTRIBUTES*N_VALUES, (MESSAGE_LENGTH, ALPHABET_SIZE), (N_ATTRIBUTES,N_VALUES), device=DEVICE).to(DEVICE)
 
     average_logging=[]
 
-    dataset = dset.dataset.copy()
     #indexing array, could later be used for train-test-split
-    trainset = np.arange(len(dataset))
+    trainset = np.arange(len(dataloader))
 
-    reinforce=REINFORCEGS(dataset, agent, trainset, lr=LEARNING_RATE)
+    reinforce=REINFORCEGS(dataloader, agent, trainset, lr=LEARNING_RATE)
     #bit weird, but we iterate over the whole dataset instead of sampling from it. Should that be changed?
-    for epoch in tqdm(range(N_EPOCHS)):
-        np.random.shuffle(trainset)
+    
+    #generator for sampling
+    sampler=dataloader.sampler()
+    
+    for i in tqdm(range(N_STEPS)):
+        level=next(sampler)
+        if i == N_STEPS:
+            break
 
-        #new part
-        for level in trainset:
-            reinforce.step(level)
+        reinforce.step(level)
 
         #again future training function
-        average_logging.append(sum(reinforce.logging[-len(trainset):])/len(trainset))
 
-        if not (epoch+1)%EVAL_STEP:
-            print("Epoch",epoch)
+        if not (i+1)%EVAL_STEP:
+            average_logging.append(sum(reinforce.logging[-EVAL_STEP:])/EVAL_STEP)
+
+            print("Step",i)
             print("Average, raw reward", average_logging[-1])
 
 
@@ -78,20 +82,17 @@ for LEARNING_RATE in [1e-4, 1e-5]:
             reinforce.losstime=0
             reinforce.backtime=0
             reinforce.updatetime=0
-    
+
     #save agents and log under new name, name is simply the number of the trainrun
-    names = sorted(os.listdir("dump"), reverse=True)
-    
-    #find out how many trainruns are alreay saved on harddrive
-    trainrun = 0
-    for name in names:
-        if name.endswith(".pt"):
-            trainrun=re.match(r"(\d*).pt", name)[1]
-            trainrun=str(int(trainrun)+1)
-            break
+    names = os.listdir("dump")
+    names=filter(lambda x: x.endswith("pt"),os.listdir("dump"))
+    names = [re.match(r"(\d*).pt", name)[1] for name in names]
+    trainrun=int(max(names, key = lambda x: int(x)))+1
+            
+    print(f"saving as: {trainrun}.pt")
 
     torch.save(agent,os.path.normpath("dump/"+str(trainrun)+".pt"))
-    
+
     config_and_log = {"LEARNING_RATE": LEARNING_RATE,
                       "ALPHABET_SIZE": ALPHABET_SIZE,
                       "N_EPOCHS": N_EPOCHS,
@@ -108,11 +109,11 @@ for LEARNING_RATE in [1e-4, 1e-5]:
                       "backtime:    ": reinforce.backtime,
                       "upatetime:   ": reinforce.updatetime,
                       "log": reinforce.logging}
-    
-    
+
+
     with open(os.path.normpath("dump/"+str(trainrun)+".json"), "w") as file:
         json.dump(config_and_log, file)
         #file.write(LEARNING_RATE, ALPHABET_SIZE, N_EPOCHS, N_TRAINSET, N_TESTSET, N_DISTRACTORS, N_ATTRIBUTES, MESSAGE_LENGTH, N_VALUES, DEVICE,
-    
-    plt.plot(np.arange(len(average_logging)), average_logging)
-    plt.show()
+
+plt.plot(np.arange(len(average_logging)), average_logging)
+plt.show()

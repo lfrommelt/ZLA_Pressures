@@ -10,7 +10,33 @@ def one_hot(values, n_values):
     one_hot_vector = np.eye(n_values)[values]
     return one_hot_vector.astype("int")
 
+def training_curve(agents, avg_window=100, subset=(0,-1), label=0):
+    """
+    Plots rewards during training for a trainrun saved in dump/
+    Note: not running mean (because padding), but averaged bins
+    caveat: last bin could be really small...
 
+    Parameters
+    ----------
+        agents : list(int)
+            name of the json in dump
+        avg_window : int
+            rewards will be averaged over this amount of steps
+    """
+    for agent in agents:
+        with open("dump/"+str(agent)+".json", "rt") as file:
+            config=json.load(file)
+        values = config["log"][subset[0]:subset[1]]
+        averages=[np.mean(values[i:i+avg_window]) for i in range(0,len(values)-avg_window, avg_window)]
+        if label:
+            name = config[label]
+        else:
+            name = str(agent)
+        plt.plot(range(0,len(values)-avg_window,avg_window),averages,label=name)
+    plt.legend()
+    plt.show()
+            
+            
 def evaluate(alphabet_size, dataset, agents, reference_distributions = [OptimalCoding], condition="fixed lenght", device="cpu"):
     #todo: assertions for same shape of messages
     for dist in reference_distributions:

@@ -1,10 +1,66 @@
 from data.utils import recursive_cartesian, zipf_distribution, one_hot
 import numpy as np
+import torch
 import matplotlib.pyplot as plt
 import pandas as pd
 
+class Dataloader:
+    '''
+    For simplicity this is dataloader and dataset in one class together.
+    '''
+            
+    def __init__(self, n_attributes, n_values, device="cpu"):
+        
+        #storing for convenience and explicitness
+        self.n_values=n_values
+        self.n_attributes=n_attributes
+        
+        data = recursive_cartesian(*[np.arange(n_values) for _ in range(n_attributes)])
+        # one-hot encode and sort such that value 0 is most frequent overall (value 1 second most frequent and so on)
+        self.dataset = torch.nn.functional.one_hot(data.long())[torch.sort((data+0.1).prod(dim=-1)).indices].flatten(start_dim=-2).float().to(device)
+        # stores zipf distribution as probality list over all actual items
+        normalization = sum([zipf_distribution(val+1) for val in range(len(self.dataset))])
+        self.distribution = [zipf_distribution(val+1)/normalization for val in range(len(self.dataset))]
+        
+    def __getitem__(self, index):
+        return self.dataset[index]
+    
+    def __len__(self):
+        return self.dataset.__len__()
+    
+    def __iter__(self):
+        '''
+        Iterates over dataset in ascening order of frequency rank
+        '''
+        return self.dataset.__iter__()#self.sample()]
+    
+    def sampler(self, index=False):
+        '''
+        Iterator that endlessly samles from the dataset accorrding to zipf distribution
+        '''
+        while True:
+            yield self.sample(index)
+            
+    def sample(self, index=True):
+        i = np.random.choice(len(self.dataset), p=self.distribution)
+        if index:
+            return i
+        else:
+            return self.dataset[i]
+    
+    def plot(self, samplesize=10000):
+        counts={str(datum):0 for datum in np.arange(len(self))}#indices of data are sufficient
+        for i, datum in enumerate(self.sampler()):
+            counts[str(datum)]+=1
+            if i==samplesize:
+                break
+
+        plt.plot(np.arange(1, len(self)+1), counts.values())
+        plt.show()
+
 class Dataset:
     '''
+    Note: deprecated by Dataloader
     Class responsible for creating and holding a dataset. Aditionally meant to provide test-train split and 
     all that ML stuff. NOT finetuned for memory, just loads all of it into ram at creation, so don't make it
     too big...

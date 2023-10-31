@@ -16,7 +16,7 @@ def entropy(probs):
 def one_hot(values, n_values):
     '''should maybe happen in Dataset so we don't have to do it again and again'''
     one_hot_vector = np.eye(n_values)[values]
-    return one_hot_vector.astype("int")
+    return one_hot_vector#.astype("int")
 
 #Utility Classes
 class Baseline:
@@ -42,6 +42,7 @@ class Baseline:
 class REINFORCE:
     """
     Extremely specific REINFORCE implementation, so far entails environment and everything...
+    NOT up to date
     """
     
     def __init__(self, dataset, sender_policy, receiver_policy, trainset, lr=1e-2, device="cpu", baseline=Baseline(), logging=[], n_steps=0, verbosity=-1, eval_steps=-1):
@@ -212,7 +213,6 @@ class REINFORCEGS:
                 if < 0: no; else: each indicted epoch
             others only for continuing training, can be ignored/use default otherwise
         """
-        self.dataset=dataset
         self.agent=agent
         self.trainset=trainset
         self.device=device
@@ -224,8 +224,8 @@ class REINFORCEGS:
         self.logging_steps=0
         self.alphabet_size=agent.message_shape[1]
         self.message_length=agent.message_shape[0]
-        self.n_attributes=len(dataset[0])
-        self.n_values=dataset.max()+1#we assume that the domains of all attributes have the same size
+        self.n_attributes=dataset.n_attributes
+        self.n_values=dataset.n_values#we assume that the domains of all attributes have the same size
         self.verbosity=verbosity
         self.eval_steps=eval_steps
         self.logging=[]
@@ -255,13 +255,9 @@ class REINFORCEGS:
         """
         # time of individual steps will be logged for debugging
         at=time.time()
-
-        #transform datum into state for receiver (could be done beforehand for efficiency reasons)
-        state=torch.from_numpy(one_hot(self.dataset[level],self.n_values).flatten())
-        state=state.type(torch.float).to(self.device)
         
         #likelihoods of receiver actions
-        action=self.agent(state)
+        action=self.agent(level)
         message=self.agent.message.copy()#maybe we will need it
         
         #sample action
@@ -270,7 +266,7 @@ class REINFORCEGS:
         
         except ValueError as e:
             print("action:", action)
-            print("datum:", self.dataset[level])
+            print("datum:", level)
             print("state:", state)
             print(list(self.agent.named_parameters()))
             raise e
@@ -278,8 +274,9 @@ class REINFORCEGS:
         self.agenttime+=time.time()-at
         lt=time.time()
         
-        # rewards are given per each correct one
-        reward= 1.0 if any(answer==self.dataset[level]) else -1.0
+        # rewards are given per each correct one        
+        
+        reward= 1.0 if all(np.equal(one_hot(answer,self.n_values).flatten(),level)) else -1.0
         #sum([1.0 if answer[i]==self.dataset[level][i] else -1.0/self.n_attributes for i in range(len(answer))])#why are python list operators not vectorized to begin with?
 
         self.logging.append(reward)

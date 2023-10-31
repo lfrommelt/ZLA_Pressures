@@ -16,4 +16,4 @@ DEVICE="cpu"#"cuda"
 
 dataset = Dataset(N_ATTRIBUTES, N_VALUES, distribution = "local_values", data_size_scale=10).dataset
 
-evaluate(ALPHABET_SIZE, dataset, [1])
+evaluate(ALPHABET_SIZE, dataset, [4,5,6])
