@@ -279,7 +279,8 @@ class REINFORCEGS:
         lt=time.time()
         
         # rewards are given per each correct one
-        reward=sum([1.0 if answer[i]==self.dataset[level][i] else -1.0/self.n_attributes for i in range(len(answer))])#why are python list operators not vectorized to begin with?
+        reward= 1.0 if any(answer==self.dataset[level]) else -1.0
+        #sum([1.0 if answer[i]==self.dataset[level][i] else -1.0/self.n_attributes for i in range(len(answer))])#why are python list operators not vectorized to begin with?
 
         self.logging.append(reward)
         
