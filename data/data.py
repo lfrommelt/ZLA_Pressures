@@ -49,7 +49,7 @@ class Dataloader:
             return self.dataset[i]
     
     def plot(self, samplesize=10000):
-        counts={str(datum):0 for datum in np.arange(len(self))}#indices of data are sufficient
+        counts={str(datum):0 for datum in self.dataset}#indices of data are sufficient
         for i, datum in enumerate(self.sampler()):
             counts[str(datum)]+=1
             if i==samplesize:
@@ -58,6 +58,12 @@ class Dataloader:
         plt.plot(np.arange(1, len(self)+1), counts.values())
         plt.show()
 
+    def get_index(self, x):
+        raise NotImplemented#would work, if dataset was ordered differently (this assumes that position of value plays a role, like in integers. but actually amount of value occurence is the first sorting criterion an position only the secon if at all, not sure right now
+        x = x.reshape(self.n_attributes,self.n_values)
+        return sum([np.argmax(x[-i-1])*self.n_values**i for i in range(self.n_attributes)])
+        
+        
 class Dataset:
     '''
     Note: deprecated by Dataloader

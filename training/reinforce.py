@@ -14,13 +14,13 @@ def entropy(probs):
     return -torch.sum(probs*torch.log(probs))
 
 def one_hot(values, n_values):
-    '''should maybe happen in Dataset so we don't have to do it again and again'''
     one_hot_vector = np.eye(n_values)[values]
     return one_hot_vector#.astype("int")
 
 #Utility Classes
 class Baseline:
     '''
+    TODO: look up if normalizing wrt variance is actually a thing (its not in anti-efficient coing but I have a vgue memory of it in some baseline specific paper...
     Each sample will be zero centered and scaled to unit-std (is that a thing?, should it be var?) wrt. all previous samples.
     Implemented with optimal runtime, no need to enhance code
     '''
@@ -37,15 +37,19 @@ class Baseline:
         self.s = self.s+(reward-self.mean)*(reward-mean)
         self.mean=mean
         self.std=(self.s/(self.n))**(1/2)
-        return (reward-self.mean)/self.std
-
-class REINFORCE:
+        if not self.std==0:
+            return (reward-self.mean)/self.std
+        else:
+            return reward-self.mean
+        
+class Supervised:
     """
-    Extremely specific REINFORCE implementation, so far entails environment and everything...
-    NOT up to date
+    Sender and receiver are connected by Gumbel-Softmax straight-through and therefore trained jointly wrt task. I.e. Receiver trains supervised with
+    sum_attributes(Cross-entropy(yhat_attribute, y_attribute)) and y_attribute=input, yhat:=output ist of receiver.
+    Auxilary losses however are trained with reinforce wrt the output distribution of sender. The output distribution is approximated by taking softmax
+    of the Gumbel-Softmax logits (because torch-Gumbel-Softmax is kinda black-boxy...
     """
-    
-    def __init__(self, dataset, sender_policy, receiver_policy, trainset, lr=1e-2, device="cpu", baseline=Baseline(), logging=[], n_steps=0, verbosity=-1, eval_steps=-1):
+    def __init__(self, dataset, agent, trainset, lr=1e-2, device="cpu", baseline=Baseline(), logging=[], n_steps=0, verbosity=-1, eval_steps=-1, aux_losses=[], classification = True):
         """
         args
         ----------
@@ -63,38 +67,31 @@ class REINFORCE:
                 if < 0: no; else: each indicted epoch
             others only for continuing training, can be ignored/use default otherwise
         """
+        self.agent=agent
         self.dataset=dataset
-        self.sender_policy=sender_policy
-        self.receiver_policy=receiver_policy
         self.trainset=trainset
         self.device=device
-        self.sendertime=0
-        self.listenertime=0
+        self.agenttime=0
         self.losstime=0
         self.backtime=0
         self.updatetime=0
         self.n_steps=n_steps
         self.logging_steps=0
-        self.alphabet_size=sender_policy.outlayers[0][0].out_features
-        self.message_length=len(sender_policy.outlayers)
-        self.n_attributes=len(dataset[0])
-        self.n_values=dataset.max()+1#we assume that the domains of all attributes have the same size
-        self.n_distractors=int((receiver_policy.linear1.in_features-(self.alphabet_size*self.message_length))/(self.n_attributes*self.n_values))-1
-        self.verbosity=-1
+        self.alphabet_size=agent.message_shape[1]
+        self.message_length=agent.message_shape[0]
+        self.n_attributes=dataset.n_attributes
+        self.n_values=dataset.n_values#we assume that the domains of all attributes have the same size
+        self.verbosity=verbosity
         self.eval_steps=eval_steps
         self.logging=[]
-        self.sendertime=0
-        self.listenertime=0
-        self.losstime=0
-        self.backtime=0
-        self.updatetime=0
         self.lr=lr
-        self.sender_optimizer = torch.optim.Adam(sender_policy.parameters(), lr=self.lr)
-        self.receiver_optimizer = torch.optim.Adam(receiver_policy.parameters(), lr=self.lr)
+        self.optimizer=torch.optim.Adam(agent.parameters(), lr=self.lr)
         self.baseline=baseline
+        self.ce=torch.nn.CrossEntropyLoss(reduction="sum")
+        self.aux_losses=aux_losses
+        self.classification=classification
         
-        
-    def step(self, level):
+    def step(self, level_index):
         """
         Does a single reinforce step. Implementation includes environment and everything.
 
@@ -114,88 +111,82 @@ class REINFORCE:
 
         """
         # time of individual steps will be logged for debugging
-        st=time.time()
-
-        #randomly sample a distractor from trinset, that is actually different from the target
-        distractors=np.zeros((self.n_distractors+1,self.n_attributes),dtype="int")# rename distractors <- stimuli
-        distractors[0]=self.dataset[level]
-        j=0
-        while j<self.n_distractors:
-            candidate=np.random.choice(self.trainset)
-            if not all(self.dataset[candidate] == self.dataset[level]):
-                j+=1
-                distractors[j]=self.dataset[candidate]
-        #transform datum into state for receiver (could be done beforehand for efficiency reasons)
-        s_sender=torch.from_numpy(one_hot(self.dataset[level],self.n_values).flatten())
-        s_sender=s_sender.type(torch.float).to(self.device)
+        at=time.time()
         
-        #genareate probability distribution over sender actions...
-        a_sender=self.sender_policy(s_sender)
-        probs = [prob.detach().cpu().numpy() for prob in a_sender]
-        #... and sample the action from it
-        message=[np.random.choice(np.arange(self.alphabet_size), p=prob) for prob in probs]
-
-        self.sendertime+=time.time()-st
-
-        lt=time.time()
-        
-        #transform message back so it fits its part of the receivers state space (aka one-hot encode)
-        s_receiver=np.array([[1.0 if i==symbol else 0 for i in range(self.alphabet_size)] for symbol in message])
-        
-        #indexing array "shuffle", to shuffle the order of target and distractor(s)
-        shuffle=np.arange(self.n_distractors+1,dtype="int")
-        np.random.shuffle(shuffle)
-        
-        #actual statespace of receiver, i.e. conctenate(*shuffled(Target,*Distractors), message)
-        s_receiver=torch.from_numpy(np.concatenate((*[one_hot(dist,self.n_values).flatten() for dist in distractors[shuffle]],s_receiver.flatten()))).type(torch.float).to(self.device)
+        level=self.dataset.dataset[level_index]
         #likelihoods of receiver actions
-        a_receiver=self.receiver_policy(s_receiver)[0]
-        
-        #sample from it
-        answer=np.random.choice(np.arange(self.n_distractors+1), p=a_receiver.detach().cpu().numpy())
+        if self.classification:
+            action=self.agent(level)[0]
+            answer=np.random.choice(np.arange(len(self.dataset), dtype="int"), p=action.detach().cpu().numpy())
+            # rewards are not actual rewards in Supervised, instead are used for logging task succes
+            reward= 1.0 if answer==level_index else -1.0
+        else:
+            action=self.agent(level)
+            answer=[np.random.choice(np.arange(self.n_values), p=probs) for probs in action.detach().cpu().numpy()]
+            reward= 1.0 if all(answer==level.view((self.n_attributes, self.n_values)).argmax(dim=-1).numpy()) else -1.0
+        #sample action
+        #try:
 
-        self.listenertime+=time.time()-lt
+        
+        '''
+        except ValueError as e:
+            print("action:", action)
+            print("datum:", level)
+            print("state:", state)
+            print(list(self.agent.named_parameters()))
+            raise e'''
+
+        self.agenttime+=time.time()-at
         lt=time.time()
         
-        reward= 1.0 if shuffle[answer]==0 else -1.0
+        # rewards are not given per each correct one       
 
-        self.logging.append(reward)
+        #sum([1.0 if answer[i]==self.dataset[level][i] else -1.0/self.n_attributes for i in range(len(answer))])#why are python list operators not vectorized to begin with?
+
+        self.logging.append((reward+1)/2)
         
-        #reward is averaged, baseline gets updated automatically when called
-        reward=self.baseline(reward)
+        del(reward)#in case I accidently use it in supervised
+        
+        aux_loss_values=[]
+        for aux_loss in self.aux_losses:
+            aux_loss_values.append(aux_loss(self.agent))
+            
+        #aux_loss = torch.sum(torch.stack(aux_loss_values))
+        if self.classification:
+            task_loss=self.ce(action, torch.nn.functional.one_hot(torch.tensor(level_index), len(self.dataset)).float())
+        else:
+            task_loss=self.ce(action,level.view((self.n_attributes,self.n_values)))#sum([(-torch.log(action[i,answer[i]]) * reward) for i in range(len(answer)),*aux_loss_values])
 
-        sender_loss=torch.sum((-torch.log(a_sender[np.arange(len(message)),message]) * reward))
-        receiver_loss=(-torch.log(a_receiver[answer]) * reward)
-
-
+        '''
+        print("aux",aux_loss_values)
+        print("task", task_loss)
+        print("sum", torch.sum(torch.stack((task_loss, *aux_loss_values))),"\n")'''
+        
+        loss=torch.sum(torch.stack((task_loss, *aux_loss_values)))
         self.losstime+=time.time()-lt
         bt=time.time()
         
         #reset optimizer and calculate gradients/weight upates
-        self.sender_optimizer.zero_grad()
-        sender_loss.backward() 
-
-        self.receiver_optimizer.zero_grad()
-        receiver_loss.backward()
+        self.optimizer.zero_grad()
+        aux_loss_values[0].backward()
         
         self.backtime+=time.time()-bt
 
 
         ut=time.time()
         #apply updates (no batching)
-        self.sender_optimizer.step()
-        self.receiver_optimizer.step()
+        self.optimizer.step()
         self.updatetime+=time.time()-ut
                 
-        self.n_steps+=1
-        
-        
+        self.n_steps+=1    
+    
+    
 class REINFORCEGS:
     """
     Extremely specific REINFORCE implementation, so far entails environment and everything and requires gs-agents
     """
     
-    def __init__(self, dataset, agent, trainset, lr=1e-2, device="cpu", baseline=Baseline(), logging=[], n_steps=0, verbosity=-1, eval_steps=-1):
+    def __init__(self, dataset, agent, trainset, lr=1e-2, device="cpu", baseline=Baseline(), logging=[], n_steps=0, verbosity=-1, eval_steps=-1, aux_losses=[]):
         """
         args
         ----------
@@ -258,7 +249,7 @@ class REINFORCEGS:
         
         #likelihoods of receiver actions
         action=self.agent(level)
-        message=self.agent.message.copy()#maybe we will need it
+        
         
         #sample action
         try:
@@ -274,17 +265,20 @@ class REINFORCEGS:
         self.agenttime+=time.time()-at
         lt=time.time()
         
-        # rewards are given per each correct one        
-        
-        reward= 1.0 if all(np.equal(one_hot(answer,self.n_values).flatten(),level)) else -1.0
+        # rewards are not given per each correct one        
+        reward= sum([1.0 if x else -0.1 for x in np.equal(one_hot(answer,self.n_values).flatten(),level.detach().cpu().numpy())])
         #sum([1.0 if answer[i]==self.dataset[level][i] else -1.0/self.n_attributes for i in range(len(answer))])#why are python list operators not vectorized to begin with?
 
-        self.logging.append(reward)
+        self.logging.append((reward+len(answer)*-0.1)/(len(answer)*0.1+len(answer*1.0)))#rescale to [0.0, 1.9] so it can be use as sucess rate like metric
         
         #reward is averaged, baseline gets updated automatically when called
         reward=self.baseline(reward)
+        
+        aux_loss_values=[]
+        for aux_loss in aux_losses:
+            aux_loss_values.append(aux_loss(self.agent.message))
 
-        loss=sum([(-torch.log(action[i,answer[i]]) * reward) for i in range(len(answer))])
+        task_loss=sum([*[(-torch.log(action[i,answer[i]]) * reward) for i in range(len(answer))],*aux_loss_values])
 
 
         self.losstime+=time.time()-lt
