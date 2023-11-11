@@ -1,4 +1,4 @@
-from evaluation.evaluation import evaluate
+from evaluation.evaluation import evaluate, list_runs
 from data.data import Dataset, Dataloader
 
 LEARNING_RATE=1e-4#1e-2#good results so far
@@ -18,4 +18,6 @@ N_STEPS=200000
 
 dataloader = Dataloader(N_ATTRIBUTES, N_VALUES, device=DEVICE)
 
-evaluate(ALPHABET_SIZE, dataloader, [36, 37], device=DEVICE)
+#list_runs()
+
+evaluate(ALPHABET_SIZE, dataloader, [50], device=DEVICE)

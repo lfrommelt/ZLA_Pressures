@@ -9,48 +9,38 @@ import json
 from evaluation.reference_distributions import OptimalCoding
 from data.data import Dataloader
 from training.agents import SRPolicyNet, GSPolicyNet, GSPolicyNetLSTM#will happen in training script
-from training.reinforce import Baseline, REINFORCEGS, Supervised
-from training.loss import LengthLoss
+from training.reinforce import Baseline, REINFORCEGS, Supervised, SRSupervised, SRREINFORCE
+from training.loss import LengthLoss, LeastEffortLoss, DirichletLoss
 
 #os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 #os.environ["CUDA_LAUNCH_BLOCKING"] = "0"
 
-#old stuff
-'''
-def test_data():
-    #plot/params from the paper with our dataset
-    dset = Dataset(3, 4, distribution = "local_values", data_size_scale=10)
-    dset.plot()
-    dset.plot(explicit=True)
-    dset = Dataset(3, 4, distribution = "unordered", data_size_scale=1000, distribution_param=1.5)
-    dset.plot()
-    dset.plot(explicit=True)'''
 
-LEARNING_RATE=1e-3#999#1e-4#1e-2#good results so far
+LEARNING_RATE=1e-3#1e-4
 ALPHABET_SIZE=40
 MESSAGE_LENGTH=30
 N_EPOCHS=2000
 N_TRAINSET=1000#not implemented
 N_TESTSET=100#not implemented
-EVAL_STEP=5000#00#00
+EVAL_STEP=1000#00#00
 N_DISTRACTORS=-1
 N_ATTRIBUTES=3
 N_VALUES=10
 VERBOSE=EVAL_STEP
 DEVICE="cpu"#"cuda"
-N_STEPS=600000
+N_STEPS=1000000
 
 AGENT=GSPolicyNet
 ALGORITHM=Supervised
-CLASSIFICATION=False
+CLASSIFICATION=False#False#True#False#True
 
-AUX_LOSSES=[LengthLoss(5)]
+AUX_LOSSES=[DirichletLoss(alphabet_size=ALPHABET_SIZE, differentiable=True)]#LeastEffortLoss()]#[LengthLoss(0.0)]
 BETA1=45
 BETA2=10
 
 CONTINUE=0#"28"
 
-
+trainrun=0
 
 if not CONTINUE:
     dataloader = Dataloader(N_ATTRIBUTES, N_VALUES, device=DEVICE)
@@ -58,16 +48,12 @@ if not CONTINUE:
     trainset = np.arange(len(dataloader))
 
     NOTE=input("describe the run: ")#"lr tuning for mixed length (and classifiction)"
-    agent = AGENT(N_ATTRIBUTES*N_VALUES, (MESSAGE_LENGTH, ALPHABET_SIZE), (N_ATTRIBUTES,N_VALUES), device=DEVICE).to(DEVICE)
+    agent = AGENT(N_ATTRIBUTES*N_VALUES, (MESSAGE_LENGTH, ALPHABET_SIZE), (N_ATTRIBUTES,N_VALUES), device=DEVICE, classification=CLASSIFICATION).to(DEVICE)
     start=0
     reinforce=ALGORITHM(dataloader, agent, trainset, lr=LEARNING_RATE, device=DEVICE, aux_losses=AUX_LOSSES, classification=CLASSIFICATION)
 
-    names = os.listdir("dump")
-    names=filter(lambda x: x.endswith("pt"),os.listdir("dump"))
-    names = [re.match(r"(\d*).pt", name)[1] for name in names]
-    trainrun=int(max(names, key = lambda x: int(x)))+1
+
 else:
-    import json
     with open('dump/'+CONTINUE+'.json') as json_file:
         data = json.load(json_file)
     locals().update(data)
@@ -78,11 +64,11 @@ else:
 
     start=len(log)
     agent = torch.load("dump/"+CONTINUE+".pt")
-    reinforce=ALGORITHM(dataloader, agent, trainset, lr=LEARNING_RATE, device=DEVICE, aux_losses=AUX_LOSSES, classification=CLASSIFICATION)
+    reinforce=ALGORITHM(dataloader, agent, trainset, lr=LEARNING_RATE, device=DEVICE, aux_losses=AUX_LOSSES, classification=CLASSIFICATION, lr_listener=LR_LISTEN)
     reinforce.logging=log
     trainrun=int(CONTINUE)
-    
-    
+
+
 
 alpha_func = lambda x: x**BETA1/BETA2
 #should become a function `training()` that is parameterized with the hyperparameters
@@ -110,15 +96,23 @@ for i in tqdm(range(start, N_STEPS)):
 
     #again future training function
     if not (i+1)%EVAL_STEP:
+        
+        if not trainrun:
+                names = os.listdir("dump")
+                names=filter(lambda x: x.endswith("pt"),os.listdir("dump"))
+                names = [re.match(r"(\d*).pt", name)[1] for name in names]
+                trainrun=int(max(names, key = lambda x: int(x)))+1
+                
         average_logging.append(sum(reinforce.logging[-EVAL_STEP:])/EVAL_STEP)
 
         alpha = alpha_func(average_logging[-1])
         print("Step",i)
         print("Average, raw reward", average_logging[-1])
-        print("alpha:", AUX_LOSSES[0].alpha)
 
         if AUX_LOSSES:
-            pass#AUX_LOSSES[0].alpha=alpha
+            print("alpha:", AUX_LOSSES[0].alpha)
+
+            AUX_LOSSES[0].alpha=alpha
 
         '''
         print("agenttime:", reinforce.agenttime,"\n",
@@ -158,7 +152,8 @@ for i in tqdm(range(start, N_STEPS)):
                           "log": reinforce.logging,
                           "Note": NOTE,
                           "beta1": BETA1,
-                          "beta2": BETA2,}
+                          "beta2": BETA2,
+                          "classifier": CLASSIFICATION}
 
 
         with open(os.path.normpath("dump/"+str(trainrun)+".json"), "w") as file:

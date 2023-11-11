@@ -9,7 +9,7 @@ import json
 from evaluation.reference_distributions import OptimalCoding
 from data.data import Dataloader
 from training.agents import SRPolicyNet, GSPolicyNet, GSPolicyNetLSTM#will happen in training script
-from training.reinforce import Baseline, REINFORCEGS, Supervised
+from training.reinforce import Baseline, REINFORCEGS, Supervised, SRSupervised
 from training.loss import LengthLoss
 
 #os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
@@ -26,7 +26,7 @@ def test_data():
     dset.plot()
     dset.plot(explicit=True)'''
 
-LEARNING_RATE=1e-3#1e-2#good results so far
+LEARNING_RATE=1e-3#999#1e-4#1e-2#good results so far
 ALPHABET_SIZE=40
 MESSAGE_LENGTH=30
 N_EPOCHS=2000
@@ -37,99 +37,137 @@ N_DISTRACTORS=-1
 N_ATTRIBUTES=3
 N_VALUES=10
 VERBOSE=EVAL_STEP
-DEVICE="cpu"#"cuda"
-N_STEPS=60000
+DEVICE="cpu"#"cuda"#"cpu"#"cuda"
+N_STEPS=100000
 
 AGENT=GSPolicyNetLSTM
 ALGORITHM=Supervised
-CLASSIFICATION=True
+CLASSIFICATION=False#True#False#True#False#True
 
-AUX_LOSSES=[LengthLoss(1.0/MESSAGE_LENGTH)]
-NOTE=input("describe the run")#"lr tuning for mixed length (and classifiction)"
+AUX_LOSSES=[]#[LengthLoss(0.0)]
+BETA1=45
+BETA2=10
 
-dataloader = Dataloader(N_ATTRIBUTES, N_VALUES, device=DEVICE)
+CONTINUE=0#"28"
 
-#should become a function `training()` that is parameterized with the hyperparameters
-'''
-sender_policy=SRPolicyNet(N_ATTRIBUTES*N_VALUES,(MESSAGE_LENGTH,ALPHABET_SIZE),device=DEVICE).to(DEVICE)
-receiver_policy=SRPolicyNet(ALPHABET_SIZE*MESSAGE_LENGTH+N_ATTRIBUTES*N_VALUES*(N_DISTRACTORS+1),(1,N_DISTRACTORS+1),device=DEVICE).to(DEVICE)
-'''
-#overnight: N_STEPS=600000, LEARNING_RATE in [5e-4, 5e-5]
-for LEARNING_RATE in [1e-3, 1e-4]:
-    #agent = GSPolicyNetLSTM(N_ATTRIBUTES*N_VALUES, (MESSAGE_LENGTH, ALPHABET_SIZE), (N_ATTRIBUTES,N_VALUES), device=DEVICE).to(DEVICE)
-    agent = AGENT(N_ATTRIBUTES*N_VALUES, (MESSAGE_LENGTH, ALPHABET_SIZE), (N_ATTRIBUTES,N_VALUES), device=DEVICE).to(DEVICE)
+for sender_hidden, receiver_hidden in ((250,100),):
+    for LEARNING_RATE in [1e-3,]:
+                
+        if not CONTINUE:
+            dataloader = Dataloader(N_ATTRIBUTES, N_VALUES, device=DEVICE)
+            #indexing array, could later be used for train-test-split
+            trainset = np.arange(len(dataloader))
 
-    average_logging=[]
+            NOTE=input("describe the run: ")#"lr tuning for mixed length (and classifiction)"
+            agent = AGENT(N_ATTRIBUTES*N_VALUES, (MESSAGE_LENGTH, ALPHABET_SIZE), (N_ATTRIBUTES,N_VALUES), device=DEVICE, classification=CLASSIFICATION,sender_hidden=sender_hidden, receiver_hidden=receiver_hidden).to(DEVICE)
+            start=0
+            reinforce=ALGORITHM(dataloader, agent, trainset, lr=LEARNING_RATE, device=DEVICE, aux_losses=AUX_LOSSES, classification=CLASSIFICATION)
 
-    #indexing array, could later be used for train-test-split
-    trainset = np.arange(len(dataloader))
+            names = os.listdir("dump")
+            names=filter(lambda x: x.endswith("pt"),os.listdir("dump"))
+            names = [re.match(r"(\d*).pt", name)[1] for name in names]
+            trainrun=int(max(names, key = lambda x: int(x)))+1
+        else:
+            with open('dump/'+str(CONTINUE)+'.json') as json_file:
+                data = json.load(json_file)
+            locals().update(data)
+            dataloader = Dataloader(N_ATTRIBUTES, N_VALUES, device=DEVICE)
+            #indexing array, could later be used for train-test-split
+            trainset = np.arange(len(dataloader))
 
-    reinforce=ALGORITHM(dataloader, agent, trainset, lr=LEARNING_RATE, device=DEVICE, aux_losses=AUX_LOSSES, classification=CLASSIFICATION)
-    #bit weird, but we iterate over the whole dataset instead of sampling from it. Should that be changed?
-    
-    #generator for sampling
-    sampler=dataloader.sampler(index=True)
-
-    #save agents and log under new name, name is simply the number of the trainrun
-    names = os.listdir("dump")
-    names=filter(lambda x: x.endswith("pt"),os.listdir("dump"))
-    names = [re.match(r"(\d*).pt", name)[1] for name in names]
-    trainrun=int(max(names, key = lambda x: int(x)))+1
-            
-        
-    for i in tqdm(range(N_STEPS)):
-        level=next(sampler)
-
-        reinforce.step(level)
-
-        #again future training function
-        if not (i+1)%EVAL_STEP:
-            average_logging.append(sum(reinforce.logging[-EVAL_STEP:])/EVAL_STEP)
-
-            print("Step",i)
-            print("Average, raw reward", average_logging[-1])
+            NOTE="rnn overnight lr and size"
+            start=len(log)
+            agent = torch.load("dump/"+str(CONTINUE)+".pt")
+            reinforce=ALGORITHM(dataloader, agent, trainset, lr=LEARNING_RATE, device=DEVICE, aux_losses=AUX_LOSSES, classification=CLASSIFICATION)
+            reinforce.logging=log
+            trainrun=int(CONTINUE)
 
 
-            print("agenttime:", reinforce.agenttime,"\n",
-                  "losstime:    ", reinforce.losstime,"\n",
-                  "backtime:    ", reinforce.backtime,"\n",
-                  "upatetime:   ", reinforce.updatetime),"\n",
 
-            reinforce.agenttime=0
-            reinforce.losstime=0
-            reinforce.backtime=0
-            reinforce.updatetime=0
-            
-            print(f"saving as: {trainrun}.pt")
+        alpha_func = lambda x: x**BETA1/BETA2
+        #should become a function `training()` that is parameterized with the hyperparameters
+        '''
+        sender_policy=SRPolicyNet(N_ATTRIBUTES*N_VALUES,(MESSAGE_LENGTH,ALPHABET_SIZE),device=DEVICE).to(DEVICE)
+        receiver_policy=SRPolicyNet(ALPHABET_SIZE*MESSAGE_LENGTH+N_ATTRIBUTES*N_VALUES*(N_DISTRACTORS+1),(1,N_DISTRACTORS+1),device=DEVICE).to(DEVICE)
+        '''
+        #agent = GSPolicyNetLSTM(N_ATTRIBUTES*N_VALUES, (MESSAGE_LENGTH, ALPHABET_SIZE), (N_ATTRIBUTES,N_VALUES), device=DEVICE).to(DEVICE)
 
-            if len(average_logging)>1:
-                if average_logging[-1]>average_logging[-2]:
-                    torch.save(agent,os.path.normpath("dump/"+str(trainrun)+".pt"))#todo: state_ict
-
-            config_and_log = {"Losses":[str(loss) for loss in AUX_LOSSES],
-                              "Algorithm": ALGORITHM.__name__,
-                              "LEARNING_RATE": LEARNING_RATE,
-                              "ALPHABET_SIZE": ALPHABET_SIZE,
-                              "N_EPOCHS": N_EPOCHS,
-                              "N_TRAINSET": N_TRAINSET,
-                              "N_TESTSET": N_TESTSET,
-                              "EVAL_STEP": EVAL_STEP,
-                              "N_DISTRACTORS": N_DISTRACTORS,
-                              "N_ATTRIBUTES": N_ATTRIBUTES,
-                              "MESSAGE_LENGTH": MESSAGE_LENGTH,
-                              "N_VALUES": N_VALUES,
-                              "DEVICE": DEVICE,
-                              "agenttime:": reinforce.agenttime,
-                              "losstime:    ": reinforce.losstime,
-                              "backtime:    ": reinforce.backtime,
-                              "upatetime:   ": reinforce.updatetime,
-                              "log": reinforce.logging,
-                              "Note": NOTE,}
+        average_logging=[]
 
 
-            with open(os.path.normpath("dump/"+str(trainrun)+".json"), "w") as file:
-                json.dump(config_and_log, file)
-        #file.write(LEARNING_RATE, ALPHABET_SIZE, N_EPOCHS, N_TRAINSET, N_TESTSET, N_DISTRACTORS, N_ATTRIBUTES, MESSAGE_LENGTH, N_VALUES, DEVICE,
+        #bit weird, but we iterate over the whole dataset instead of sampling from it. Should that be changed?
+
+        #generator for sampling
+        sampler=dataloader.sampler(index=True)
+
+        #save agents and log under new name, name is simply the number of the trainrun
+        # overnight: BETA1, BETA2 in ((45,10),(45,15),(45,20),(45,30))
+
+        for i in tqdm(range(start, N_STEPS)):
+            level=next(sampler)
+
+            reinforce.step(level)
+
+            #again future training function
+            if not (i+1)%EVAL_STEP:
+                average_logging.append(sum(reinforce.logging[-EVAL_STEP:])/EVAL_STEP)
+
+                alpha = alpha_func(average_logging[-1])
+                print("Step",i)
+                print("Average, raw reward", average_logging[-1])
+
+                if AUX_LOSSES:
+                    print("alpha:", AUX_LOSSES[0].alpha)
+
+                    AUX_LOSSES[0].alpha=alpha
+
+                '''
+                print("agenttime:", reinforce.agenttime,"\n",
+                      "losstime:    ", reinforce.losstime,"\n",
+                      "backtime:    ", reinforce.backtime,"\n",
+                      "upatetime:   ", reinforce.updatetime),"\n",'''
+
+                reinforce.agenttime=0
+                reinforce.losstime=0
+                reinforce.backtime=0
+                reinforce.updatetime=0
+
+                print(f"saving as: {trainrun}.pt")
+
+                if len(average_logging)>1:
+                    if average_logging[-1]>average_logging[-2]:
+                        torch.save(agent,os.path.normpath("dump/"+str(trainrun)+".pt"))#todo: state_ict
+
+                config_and_log = {"Losses":[str(loss) for loss in AUX_LOSSES],
+                                  "Agent": str(agent),
+                                  "Algorithm": ALGORITHM.__name__,
+                                  "LEARNING_RATE": LEARNING_RATE,
+                                  "ALPHABET_SIZE": ALPHABET_SIZE,
+                                  "N_EPOCHS": N_EPOCHS,
+                                  "N_TRAINSET": N_TRAINSET,
+                                  "N_TESTSET": N_TESTSET,
+                                  "EVAL_STEP": EVAL_STEP,
+                                  "N_DISTRACTORS": N_DISTRACTORS,
+                                  "N_ATTRIBUTES": N_ATTRIBUTES,
+                                  "MESSAGE_LENGTH": MESSAGE_LENGTH,
+                                  "N_VALUES": N_VALUES,
+                                  "DEVICE": DEVICE,
+                                  "agenttime:": reinforce.agenttime,
+                                  "losstime:    ": reinforce.losstime,
+                                  "backtime:    ": reinforce.backtime,
+                                  "upatetime:   ": reinforce.updatetime,
+                                  "log": reinforce.logging,
+                                  "Note": NOTE,
+                                  "beta1": BETA1,
+                                  "beta2": BETA2,
+                                  "classifier": CLASSIFICATION,
+                                  "sender_hidden":sender_hidden,
+                                  "receiver_hidden": receiver_hidden,}
+
+
+                with open(os.path.normpath("dump/"+str(trainrun)+".json"), "w") as file:
+                    json.dump(config_and_log, file)
+            #file.write(LEARNING_RATE, ALPHABET_SIZE, N_EPOCHS, N_TRAINSET, N_TESTSET, N_DISTRACTORS, N_ATTRIBUTES, MESSAGE_LENGTH, N_VALUES, DEVICE,
 
 plt.plot(np.arange(len(average_logging)), average_logging)
 plt.show()

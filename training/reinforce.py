@@ -41,6 +41,196 @@ class Baseline:
             return (reward-self.mean)/self.std
         else:
             return reward-self.mean
+
+class MeanBaseline:
+    '''
+    TODO: look up if normalizing wrt variance is actually a thing (its not in anti-efficient coing but I have a vgue memory of it in some baseline specific paper...
+    Each sample will be zero centered and scaled to unit-std (is that a thing?, should it be var?) wrt. all previous samples.
+    Implemented with optimal runtime, no need to enhance code
+    '''
+    def __init__(self):
+        #note: assumes a reward of 0 before start -> negativ reward is meaningful from the beginning on, no zero divisions have to be caught
+        self.n=1
+        self.mean=0.0
+        
+    def __call__(self, reward):
+        self.n+=1
+        self.mean = (self.n-1)/self.n*self.mean+(1/self.n)*reward
+        return reward-self.mean
+    
+def cross_entropy(prediction, target, dim=-1):
+    '''
+    what is wrong with torch??? why do have to do everything yourself if you don't want undocumented weird stuff to happen???
+    just throw an error if inputs are not normalized, but don't just calculate stuff and call it cross entropy allthough it is not
+    '''
+    return -torch.sum(target*torch.log(prediction))
+    
+    
+class SRSupervised:
+    """
+    
+    """
+    def __init__(self, dataset, agent, trainset, lr=1e-2, device="cpu", baseline=MeanBaseline(), logging=[], n_steps=0, verbosity=-1, eval_steps=-1, aux_losses=[], classification = True, lr_listen=0):
+        """
+        args
+        ----------
+            dataset : np.array(shape=(n_data, n_attributes), dtype=attribute_domain)
+                data
+            sender : SRPolicyNet
+                sender
+            receiver : SRPolicyNet
+                receiver
+            trainset : array
+                mask for dataset
+        kwargs
+        ----------
+            verbosity : int
+                if < 0: no; else: each indicted epoch
+            others only for continuing training, can be ignored/use default otherwise
+        """
+        self.agent=agent
+        self.dataset=dataset
+        self.trainset=trainset
+        self.device=device
+        self.agenttime=0
+        self.losstime=0
+        self.backtime=0
+        self.updatetime=0
+        self.n_steps=n_steps
+        self.logging_steps=0
+        self.alphabet_size=agent.message_shape[1]
+        self.message_length=agent.message_shape[0]
+        self.n_attributes=dataset.n_attributes
+        self.n_values=dataset.n_values#we assume that the domains of all attributes have the same size
+        self.verbosity=verbosity
+        self.eval_steps=eval_steps
+        self.logging=[]
+        self.lr=lr
+        self.speaker_optimizer=torch.optim.Adam(agent.speaker.parameters(), lr=self.lr)
+        if lr_listen:
+            self.listener_optimizer=torch.optim.Adam(agent.listener.parameters(), lr=lr_listen)
+        else:
+            self.listener_optimizer=torch.optim.Adam(agent.listener.parameters(), lr=self.lr)
+        self.baseline=baseline
+        #wtf drecks torch ce-loss does softmax itself?!?!?!?
+        #self.ce=torch.nn.CrossEntropyLoss(reduction="sum")
+        self.ce = cross_entropy
+        self.aux_losses=aux_losses
+        self.classification=classification
+        #self.fixed = not "LSTM" in agent.__class__()
+        
+    def step(self, level_index):
+        """
+        Does a single reinforce step. Implementation includes environment and everything.
+
+
+        Parameters
+        ----------
+            n_attributes : int
+                amount of attributes per datum
+            n_values : int
+                all attributes have the same domain, i.e. arange(n_values)
+            distribution : str
+                flag for the distribution type, kinda ugly but that way accesible as param of the constructor, also see respective methods
+            distribution_param : float
+                a parameter of the Zipf-Mandelbrot law
+            data_size_scale : float
+                see _create_dataset functions for details
+
+        """
+        # time of individual steps will be logged for debugging
+        at=time.time()
+        
+        level=self.dataset.dataset[level_index]
+        #likelihoods of receiver actions
+        if self.classification:
+            action=self.agent(level)
+            answer=np.random.choice(np.arange(len(self.dataset), dtype="int"), p=action.detach().cpu().numpy())
+            # rewards are not actual rewards in Supervised, instead are used for logging task succes
+            reward= 1.0 if answer==level_index else -1.0
+        else:
+            action=self.agent(level)
+            answer=[np.random.choice(np.arange(self.n_values), p=probs) for probs in action.detach().cpu().numpy()]
+            reward= 1.0 if all(answer==level.view((self.n_attributes, self.n_values)).argmax(dim=-1).numpy()) else -1.0
+        #sample action
+        #try:
+
+        
+        '''
+        except ValueError as e:
+            print("action:", action)
+            print("datum:", level)
+            print("state:", state)
+            print(list(self.agent.named_parameters()))
+            raise e'''
+
+        self.agenttime+=time.time()-at
+        lt=time.time()
+        
+        # rewards are not given per each correct one       
+
+        #sum([1.0 if answer[i]==self.dataset[level][i] else -1.0/self.n_attributes for i in range(len(answer))])#why are python list operators not vectorized to begin with?
+
+        self.logging.append((reward+1)/2)
+        
+        del(reward)#in case I accidently use it in supervised
+        
+        '''
+        aux_loss_values=[]
+        for aux_loss in self.aux_losses:
+            aux_loss_values.append(aux_loss(self.agent))'''
+            
+        #aux_loss = torch.sum(torch.stack(aux_loss_values))
+        if self.classification:
+            listener_loss=self.ce(action, torch.nn.functional.one_hot(torch.tensor(level_index), len(self.dataset)).float())
+        else:
+            listener_loss=self.ce(action,level.view((self.n_attributes,self.n_values)))#sum([(-torch.log(action[i,answer[i]]) * reward) for i in range(len(answer)),*aux_loss_values])
+
+        '''
+        print("aux",aux_loss_values)
+        print("task", task_loss)
+        print("sum", torch.sum(torch.stack((task_loss, *aux_loss_values))),"\n")'''
+        
+        #get log probs of choosen action
+        mask=torch.from_numpy(np.tile(np.arange(self.alphabet_size),(len(self.agent.message),1))==self.agent.message.reshape((-1,self.alphabet_size)).numpy())
+        
+
+        #print(listener_loss)
+        #print(self.aux_losses[0].alpha)
+        #print(self.message_length-sum(self.agent.message.cpu().detach().argmax(dim=-1)==0))
+        
+        if self.aux_losses:
+            aux_penalty=self.aux_losses[0].alpha*(self.message_length-sum(self.agent.message.cpu().detach().argmax(dim=-1)==0))
+        else:
+            aux_penalty=0
+            
+        speaker_penalty=self.baseline(listener_loss.detach()+aux_penalty)#torch.sum(torch.stack((task_loss, *aux_loss_values)))
+        
+        #i.e. log of joint probability. sum of log probs should be same, right?
+        speaker_loss=torch.log(torch.prod(self.agent.speaker.message_probs[mask]))*speaker_penalty
+        
+        
+        self.losstime+=time.time()-lt
+        bt=time.time()
+        
+        #reset optimizer and calculate gradients/weight upates
+        self.listener_optimizer.zero_grad()
+        listener_loss.backward()
+        
+        self.speaker_optimizer.zero_grad()
+        speaker_loss.backward()
+        
+        self.backtime+=time.time()-bt
+
+
+        ut=time.time()
+        #apply updates (no batching)
+        self.listener_optimizer.step()
+        self.speaker_optimizer.step()
+        self.updatetime+=time.time()-ut
+                
+        self.n_steps+=1    
+    
         
 class Supervised:
     """
@@ -49,7 +239,7 @@ class Supervised:
     Auxilary losses however are trained with reinforce wrt the output distribution of sender. The output distribution is approximated by taking softmax
     of the Gumbel-Softmax logits (because torch-Gumbel-Softmax is kinda black-boxy...
     """
-    def __init__(self, dataset, agent, trainset, lr=1e-2, device="cpu", baseline=Baseline(), logging=[], n_steps=0, verbosity=-1, eval_steps=-1, aux_losses=[], classification = True):
+    def __init__(self, dataset, agent, trainset, lr=1e-2, device="cpu", baseline=MeanBaseline(), logging=[], n_steps=0, verbosity=-1, eval_steps=-1, aux_losses=[], classification = True):
         """
         args
         ----------
@@ -87,7 +277,9 @@ class Supervised:
         self.lr=lr
         self.optimizer=torch.optim.Adam(agent.parameters(), lr=self.lr)
         self.baseline=baseline
-        self.ce=torch.nn.CrossEntropyLoss(reduction="sum")
+        #wtf drecks torch ce-loss does softmax itself?!?!?!?
+        #self.ce=torch.nn.CrossEntropyLoss(reduction="sum")
+        self.ce = cross_entropy
         self.aux_losses=aux_losses
         self.classification=classification
         
@@ -116,7 +308,7 @@ class Supervised:
         level=self.dataset.dataset[level_index]
         #likelihoods of receiver actions
         if self.classification:
-            action=self.agent(level)[0]
+            action=self.agent(level)
             answer=np.random.choice(np.arange(len(self.dataset), dtype="int"), p=action.detach().cpu().numpy())
             # rewards are not actual rewards in Supervised, instead are used for logging task succes
             reward= 1.0 if answer==level_index else -1.0
@@ -147,29 +339,48 @@ class Supervised:
         
         del(reward)#in case I accidently use it in supervised
         
+        '''
         aux_loss_values=[]
         for aux_loss in self.aux_losses:
-            aux_loss_values.append(aux_loss(self.agent))
+            aux_loss_values.append(aux_loss(self.agent))'''
             
         #aux_loss = torch.sum(torch.stack(aux_loss_values))
         if self.classification:
-            task_loss=self.ce(action, torch.nn.functional.one_hot(torch.tensor(level_index), len(self.dataset)).float())
+            listener_loss=self.ce(action, torch.nn.functional.one_hot(torch.tensor(level_index), len(self.dataset)).float())
         else:
-            task_loss=self.ce(action,level.view((self.n_attributes,self.n_values)))#sum([(-torch.log(action[i,answer[i]]) * reward) for i in range(len(answer)),*aux_loss_values])
+            listener_loss=self.ce(action,level.view((self.n_attributes,self.n_values)))#sum([(-torch.log(action[i,answer[i]]) * reward) for i in range(len(answer)),*aux_loss_values])
 
         '''
         print("aux",aux_loss_values)
         print("task", task_loss)
         print("sum", torch.sum(torch.stack((task_loss, *aux_loss_values))),"\n")'''
         
-        loss=torch.sum(torch.stack((task_loss, *aux_loss_values)))
+        #get log probs of choosen action
+        
+        mask=torch.from_numpy(np.tile(np.arange(self.alphabet_size),(len(self.agent.message),1))==self.agent.message.reshape((-1,self.alphabet_size)).numpy())
+        
+
+        #print(listener_loss)
+        #print(self.aux_losses[0].alpha)
+        #print(self.message_length-sum(self.agent.message.cpu().detach().argmax(dim=-1)==0))
+        
+        if self.aux_losses:
+            aux_loss=self.aux_losses[0](self.agent)
+            
+        
         self.losstime+=time.time()-lt
         bt=time.time()
         
         #reset optimizer and calculate gradients/weight upates
         self.optimizer.zero_grad()
-        aux_loss_values[0].backward()
+        #listener_loss.backward(retain_graph=True)#hope this works as intended...
         
+        if self.aux_losses:
+            (listener_loss + aux_loss).backward()
+            
+        else:
+            listener_loss.backward()
+            
         self.backtime+=time.time()-bt
 
 
@@ -179,6 +390,181 @@ class Supervised:
         self.updatetime+=time.time()-ut
                 
         self.n_steps+=1    
+    
+    
+class SRREINFORCE:
+    """
+    Both sender and receiver get the same reward(/penalty) for individual reinforce updates
+    """
+    def __init__(self, dataset, agent, trainset, lr=1e-2, device="cpu", baseline=MeanBaseline(), logging=[], n_steps=0, verbosity=-1, eval_steps=-1, aux_losses=[], classification = True, lr_listen=0):
+        """
+        args
+        ----------
+            dataset : np.array(shape=(n_data, n_attributes), dtype=attribute_domain)
+                data
+            sender : SRPolicyNet
+                sender
+            receiver : SRPolicyNet
+                receiver
+            trainset : array
+                mask for dataset
+        kwargs
+        ----------
+            verbosity : int
+                if < 0: no; else: each indicted epoch
+            others only for continuing training, can be ignored/use default otherwise
+        """
+        self.agent=agent
+        self.dataset=dataset
+        self.trainset=trainset
+        self.device=device
+        self.agenttime=0
+        self.losstime=0
+        self.backtime=0
+        self.updatetime=0
+        self.n_steps=n_steps
+        self.logging_steps=0
+        self.alphabet_size=agent.message_shape[1]
+        self.message_length=agent.message_shape[0]
+        self.n_attributes=dataset.n_attributes
+        self.n_values=dataset.n_values#we assume that the domains of all attributes have the same size
+        self.verbosity=verbosity
+        self.eval_steps=eval_steps
+        self.logging=[]
+        self.lr=lr
+        self.speaker_optimizer=torch.optim.Adam(agent.speaker.parameters(), lr=self.lr)
+        if lr_listen:
+            self.listener_optimizer=torch.optim.Adam(agent.listener.parameters(), lr=lr_listen)
+        else:
+            self.listener_optimizer=torch.optim.Adam(agent.listener.parameters(), lr=self.lr)
+        self.baseline1=MeanBaseline()
+        self.baseline2=MeanBaseline()
+        #wtf drecks torch ce-loss does softmax itself?!?!?!?
+        #self.ce=torch.nn.CrossEntropyLoss(reduction="sum")
+        self.ce = cross_entropy
+        self.aux_losses=aux_losses
+        self.classification=classification
+        #self.fixed = not "LSTM" in agent.__class__()
+        
+    def step(self, level_index):
+        """
+        Does a single reinforce step. Implementation includes environment and everything.
+
+
+        Parameters
+        ----------
+            n_attributes : int
+                amount of attributes per datum
+            n_values : int
+                all attributes have the same domain, i.e. arange(n_values)
+            distribution : str
+                flag for the distribution type, kinda ugly but that way accesible as param of the constructor, also see respective methods
+            distribution_param : float
+                a parameter of the Zipf-Mandelbrot law
+            data_size_scale : float
+                see _create_dataset functions for details
+
+        """
+        # time of individual steps will be logged for debugging
+        at=time.time()
+        
+        level=self.dataset.dataset[level_index]
+        #likelihoods of receiver actions
+        if self.classification:
+            action=self.agent(level)
+            answer=np.random.choice(np.arange(len(self.dataset), dtype="int"), p=action.detach().cpu().numpy())
+            # rewards are not actual rewards in Supervised, instead are used for logging task succes
+            reward= 1.0 if answer==level_index else -1.0
+        else:
+            action=self.agent(level)
+            answer=[np.random.choice(np.arange(self.n_values), p=probs) for probs in action.detach().cpu().numpy()]
+            reward= 1.0 if all(answer==level.view((self.n_attributes, self.n_values)).argmax(dim=-1).numpy()) else -1.0
+        #sample action
+        #try:
+
+        
+        '''
+        except ValueError as e:
+            print("action:", action)
+            print("datum:", level)
+            print("state:", state)
+            print(list(self.agent.named_parameters()))
+            raise e'''
+
+        self.agenttime+=time.time()-at
+        lt=time.time()
+        
+        # rewards are not given per each correct one       
+
+        #sum([1.0 if answer[i]==self.dataset[level][i] else -1.0/self.n_attributes for i in range(len(answer))])#why are python list operators not vectorized to begin with?
+
+        self.logging.append((reward+1)/2)
+        
+        #del(reward)#in case I accidently use it in supervised
+        
+        '''
+        aux_loss_values=[]
+        for aux_loss in self.aux_losses:
+            aux_loss_values.append(aux_loss(self.agent))'''
+            
+        #aux_loss = torch.sum(torch.stack(aux_loss_values))
+        if self.classification:
+            listener_penalty=self.ce(action, torch.nn.functional.one_hot(torch.tensor(level_index), len(self.dataset)).float())
+        else:
+            listener_penalty=self.ce(action,level.view((self.n_attributes,self.n_values)))#sum([(-torch.log(action[i,answer[i]]) * reward) for i in range(len(answer)),*aux_loss_values])
+
+        '''
+        print("aux",aux_loss_values)
+        print("task", task_loss)
+        print("sum", torch.sum(torch.stack((task_loss, *aux_loss_values))),"\n")'''
+        
+        #get log probs of choosen action
+        mask=torch.from_numpy(np.tile(np.arange(self.alphabet_size),(len(self.agent.message),1))==self.agent.message.reshape((-1,self.alphabet_size)).numpy())
+        
+
+        #print(listener_loss)
+        #print(self.aux_losses[0].alpha)
+        #print(self.message_length-sum(self.agent.message.cpu().detach().argmax(dim=-1)==0))
+        
+        if self.aux_losses:
+            aux_penalty=self.aux_losses[0].alpha*(self.message_length-sum(self.agent.message.cpu().detach().argmax(dim=-1)==0))
+        else:
+            aux_penalty=0
+        
+        #speaker_penalty=self.baseline2(listener_penalty.detach()+aux_penalty)#torch.sum(torch.stack((task_loss, *aux_loss_values)))
+        #listener_penalty=self.baseline1(listener_penalty.detach())
+        
+        speaker_penalty=self.baseline1(reward)
+        #i.e. log of joint probability. sum of log probs should be same, right?
+        #speaker_loss=torch.log(torch.prod(self.agent.speaker.message_probs[mask]))*speaker_penalty
+        speaker_loss=torch.sum((-torch.log(self.agent.speaker.message_probs[mask] * speaker_penalty)))
+
+        listener_probs=action[range(len(action)), answer]
+        
+        #listener_loss=torch.log(torch.prod(listener_probs))*listener_penalty
+        
+        listener_loss=sum([(-torch.log(action[i,answer[i]]) * speaker_penalty) for i in range(len(answer))])
+
+        self.losstime+=time.time()-lt
+        bt=time.time()
+        
+        #reset optimizer and calculate gradients/weight upates
+        self.listener_optimizer.zero_grad()
+        listener_loss.backward()
+        
+        self.speaker_optimizer.zero_grad()
+        speaker_loss.backward()
+        
+        self.backtime+=time.time()-bt
+
+
+        ut=time.time()
+        #apply updates (no batching)
+        self.listener_optimizer.step()
+        self.speaker_optimizer.step()
+        self.updatetime+=time.time()-ut
+                
+        self.n_steps+=1   
     
     
 class REINFORCEGS:
