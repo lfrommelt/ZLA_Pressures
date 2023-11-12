@@ -20,4 +20,4 @@ dataloader = Dataloader(N_ATTRIBUTES, N_VALUES, device=DEVICE)
 
 #list_runs()
 
-evaluate(ALPHABET_SIZE, dataloader, [50], device=DEVICE)
+evaluate(ALPHABET_SIZE, dataloader, [41], device=DEVICE)

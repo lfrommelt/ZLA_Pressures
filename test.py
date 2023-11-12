@@ -34,7 +34,7 @@ AGENT=GSPolicyNet
 ALGORITHM=Supervised
 CLASSIFICATION=False#False#True#False#True
 
-AUX_LOSSES=[DirichletLoss(alphabet_size=ALPHABET_SIZE, differentiable=True)]#LeastEffortLoss()]#[LengthLoss(0.0)]
+AUX_LOSSES=[LeastEffortLoss()]#[DirichletLoss(alphabet_size=ALPHABET_SIZE, differentiable=True)]#LeastEffortLoss()]#[LengthLoss(0.0)]
 BETA1=45
 BETA2=10
 

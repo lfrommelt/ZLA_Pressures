@@ -76,7 +76,7 @@ class LeastEffortLoss:
 
         
     def __repr__(self):
-        return f"LengthLoss({self.alpha})"
+        return f"LeastEffort"
     
     def __call__(self, agent):
         '''
@@ -147,7 +147,7 @@ class DirichletLoss:
         self.differentiable=differentiable
         
     def __repr__(self):
-        return f"LengthLoss({self.alpha})"
+        return f"DirichletLoss(diff={str(self.differentiable)})"
     
     def __call__(self, agent):
         '''

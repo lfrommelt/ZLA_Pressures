@@ -1,5 +1,5 @@
 from evaluation.reference_distributions import *
-from training.agents import GSPolicyNet, SRGSPolicyNet
+from training.agents import GSPolicyNet, SRPolicyNet
 import matplotlib.pyplot as plt
 import numpy as np
 import json
@@ -63,7 +63,7 @@ def one_hot(values, n_values):
     one_hot_vector = np.eye(n_values)[values]
     return one_hot_vector.astype("int")
 
-def training_curve(agents, avg_window=100, subset=(0,-1), label=0):
+def training_curve(agents, avg_window=100, subset=(0,-1), label=0, legend=True):
     """
     Plots rewards during training for a trainrun saved in dump/
     Note: not running mean (because padding), but averaged bins
@@ -76,19 +76,27 @@ def training_curve(agents, avg_window=100, subset=(0,-1), label=0):
         avg_window : int
             rewards will be averaged over this amount of steps
     """
-    for agent in agents:
+    for i, agent in enumerate(agents):
         with open("dump/"+str(agent)+".json", "rt") as file:
             config=json.load(file)
         values = config["log"][subset[0]:subset[1]]
+        if min(values)<0:
+            values=[(value+1)/2 for value in values]
         averages=[np.mean(values[i:i+avg_window]) for i in range(0,len(values)-avg_window, avg_window)]
-        if label:
+        if type(label)==list:
+            name=label[i]
+        elif label:
             name = config[label]
         else:
             name = str(agent)
-        plt.plot(range(0,len(values)-avg_window,avg_window),averages,label=name)
-    plt.legend()
-    plt.show()
             
+        plt.plot(range(0,len(values)-avg_window,avg_window),averages,label=name)
+    
+    plt.ylabel("Success Rate")
+    plt.xlabel("Update Steps")
+    if legend:
+        plt.legend()
+    plt.show()
             
 def evaluate(alphabet_size, dataset, agents, reference_distributions = [OptimalCoding], condition="fixed lenght", device="cpu"):
     #todo: assertions for same shape of messages
@@ -100,7 +108,7 @@ def evaluate(alphabet_size, dataset, agents, reference_distributions = [OptimalC
         with open("dump/"+str(name)+".json", "rt") as file:
             config=json.load(file)
             
-        the_class = re.match(r".*'.*agents.(.*)'", "<class 'training.agents.SRGSPolicyNet'>")[1]
+        the_class = re.match(r".*'.*agents.(.*)'", config["Agent"])[1]#"<class 'training.agents.SRGSPolicyNet'>")[1]
 
         agent=eval(the_class)(config["N_ATTRIBUTES"]*config["N_VALUES"], (config["MESSAGE_LENGTH"], config["ALPHABET_SIZE"]), (config["N_ATTRIBUTES"], config["N_VALUES"]))
         agent.load_state_dict(torch.load("dump/"+str(name)+".pt", map_location=torch.device(device)).state_dict())
@@ -118,7 +126,7 @@ def evaluate(alphabet_size, dataset, agents, reference_distributions = [OptimalC
                 if not i%200:
                     print(messages[i])
                 
-            no_comm=np.argmax(np.bincount(messages.flatten().astype("int")))
+            no_comm=0#np.argmax(np.bincount(messages.flatten().astype("int")))
             print(f"agent {agent.__class__.__name__} no_comm: {no_comm}")
             print(np.bincount(messages.flatten().astype("int"), minlength=config["ALPHABET_SIZE"]))
             for i in range(len(messages)):
