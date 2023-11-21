@@ -7,7 +7,7 @@ There is no command line usage implemented. Instead, training functions should b
 
 For example usage, see the test scripts on the top level of this repo.
 
-# Next Steps
+### Next Steps (old list but some are still relevant)
 - fixed length setting: check if sparse rewards (reward iff ALL output values match) is better
 - refine fixed length setting
 	- test for alphabet size from paper
