@@ -1,4 +1,4 @@
-from training.reinforce import MeanBaseline#maybe should go to utils
+from training.algorithms import MeanBaseline#maybe should go to utils
 import torch
 import numpy as np
 

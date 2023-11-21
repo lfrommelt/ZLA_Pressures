@@ -1,7 +1,45 @@
 import torch
 import numpy as np
+from abc import ABC, abstractmethod
 
+class Agent(ABC):
+    
+    @abstractmethod
+    def __init__(self, in_shape, message_shape, out_shape, device="cpu", sender_hidden=250, receiver_hidden=100, classification=True):
+        """
+        Initialize the class instance with the given parameters.
 
+        Parameters:
+        -----------
+        in_shape : tuple
+            The input shape of the data.
+
+        message_shape : tuple
+            The shape of the message passed between sender and receiver.
+
+        out_shape : tuple
+            The output shape of the data.
+
+        device : str, optional
+            The device used for computation. Default is "cpu".
+
+        sender_hidden : int, optional
+            The number of hidden units in the sender's neural network. Default is 250.
+
+        receiver_hidden : int, optional
+            The number of hidden units in the receiver's neural network. Default is 100.
+
+        classification : bool, optional
+            Flag indicating whether the task is a classification task. Default is True.
+        """
+        pass
+        
+    @abstractmethod
+    def forward(self, x):
+        """
+        Perform a single forward pass, save hidden values for aux losses.
+        """
+        pass
 
 # todo: we need some architecture where sender and receiver are "connected" by gumbel-softmax. See Docstring for SRPolicyNet for details.
 class GSPolicyNetLSTM(torch.nn.Module):

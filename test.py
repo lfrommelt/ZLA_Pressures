@@ -1,21 +1,63 @@
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
-from tqdm import tqdm
-import os
-import re
-import json
-
-from evaluation.reference_distributions import OptimalCoding
-from data.data import Dataloader
-from training.agents import SRPolicyNet, GSPolicyNet, GSPolicyNetLSTM#will happen in training script
-from training.reinforce import Baseline, REINFORCEGS, Supervised, SRSupervised, SRREINFORCE
+from training.agents import SRPolicyNet, GSPolicyNet, GSPolicyNetLSTM
+from training.algorithms import Baseline, REINFORCEGS, Supervised, SRSupervised, SRREINFORCE
 from training.loss import LengthLoss, LeastEffortLoss, DirichletLoss
-
 #os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 #os.environ["CUDA_LAUNCH_BLOCKING"] = "0"
+from training.training import training as training#sorry
 
+# training
+LEARNING_RATE=1e-3#1e-4
+N_STEPS=60000
+ALGORITHM=Supervised
 
+# message properties
+ALPHABET_SIZE=40
+MESSAGE_LENGTH=30
+
+# task
+N_ATTRIBUTES=3
+N_VALUES=10
+
+# condition
+AGENT=GSPolicyNet
+AUX_LOSSES=[LeastEffortLoss()]
+BETA1=45
+BETA2=10
+
+# test for generalization properties
+N_TRAINSET=1000#not implemented
+N_TESTSET=100#not implemented
+
+# misc
+DEVICE="cpu"#"cuda"
+EVAL_STEP=1000#print current success rate and do checkpoint
+VERBOSE=EVAL_STEP
+CONTINUE=0#enables to continute training from a checkpoint
+
+training(
+    learning_rate=LEARNING_RATE,
+    n_steps=N_STEPS,
+    algorithm=ALGORITHM,
+    alphabet_size=ALPHABET_SIZE,
+    message_length=MESSAGE_LENGTH,
+    n_attributes=N_ATTRIBUTES,
+    n_values=N_VALUES,
+    agent=AGENT,
+    aux_losses=AUX_LOSSES,
+    beta1=BETA1,
+    beta2=BETA2,
+    n_trainset=N_TRAINSET,
+    n_testset=N_TESTSET,
+    verbose=VERBOSE,
+    device=DEVICE,
+    eval_step=EVAL_STEP,
+    continue_=CONTINUE,
+    lr_listener=0,
+    plot=False
+    )
+    
+    
+"""    
 LEARNING_RATE=1e-3#1e-4
 ALPHABET_SIZE=40
 MESSAGE_LENGTH=30
@@ -40,8 +82,8 @@ BETA2=10
 
 CONTINUE=0#"28"
 
-trainrun=0
 
+trainrun=0
 if not CONTINUE:
     dataloader = Dataloader(N_ATTRIBUTES, N_VALUES, device=DEVICE)
     #indexing array, could later be used for train-test-split
@@ -162,3 +204,4 @@ for i in tqdm(range(start, N_STEPS)):
 
 plt.plot(np.arange(len(average_logging)), average_logging)
 plt.show()
+"""

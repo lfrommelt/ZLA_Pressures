@@ -1,5 +1,11 @@
 # ZLA_Pressures
-Implementation of project work for AMMAC
+Implementation of project work for AMMAC.
+This repository aims at replicating the analysis performed in [Chaabouni et al. (2019)](https://arxiv.org/abs/1905.12561) and applying it to [Rita Chaabouni & Dupoux (2020)](https://arxiv.org/abs/2010.018789), [Luna et al. (2020)](https://arxiv.org/abs/2004.03868) and [Mordatch & Abbeel (2018)](https://ojs.aaai.org/index.php/AAAI/article/view/11492).
+
+## Intended Usage
+There is no command line usage implemented. Instead, training functions should be called with the intended hyperparameters. Hyperparameter selection and performance during training are logged and, together with the model weights, are serialize in the `dump` folder. The `evaluation` module provides easy access to this data, as well as conparing runs with respect to emergent word-length-distributions.
+
+For example usage, see the test scripts on the top level of this repo.
 
 # Next Steps
 - fixed length setting: check if sparse rewards (reward iff ALL output values match) is better
