@@ -9,9 +9,8 @@ def zipf_distribution(freq_rank, a = 1.0, b = 2.7):
 
 
 def recursive_cartesian(*arrays):
-    
     '''
-    Returns (...((arrays[0] x arrays[1]) x arrays[2]) x ... arrays[-1]) as a two dimensional tensor
+    Returns (...((arrays[0] x arrays[1]) x arrays[2]) x ... arrays[-1]) as a two dimensional tensor. Wrapper for actual recursion.
     '''
     return torch.from_numpy(np.array(_recursive_cartesian(arrays[0].reshape((len(arrays[0]),1)),*arrays[1:])))
 
@@ -25,9 +24,3 @@ def _recursive_cartesian(*arrays):
         return new
     else:
         return _recursive_cartesian(new, *arrays[2:])
-    
-def one_hot():
-    '''
-    transform vectors of size n_attributes to one hot encoded (n_attributes, n_values) arrays
-    '''
-    pass

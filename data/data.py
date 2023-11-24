@@ -6,18 +6,36 @@ import pandas as pd
 
 class Dataloader:
     '''
-    For simplicity this is dataloader and dataset in one class together.
+    For simplicity this is dataloader and dataset in one class together. This
+    was actually used for most experiments, the rest was used during early
+    phases, only.
     '''
             
     def __init__(self, n_attributes, n_values, device="cpu"):
+        """
+        Creates the dataset at initialiszation and stores it.
         
+        
+        Parameters
+        ----------
+            n_attributes : int
+                amount of attributes per datum
+            n_values : int
+                all attributes have the same domain, i.e. arange(n_values)
+            device : str
+                Data will be loaded to device exactly once at creation time
+                in order to save runtime. Datasets are small enough so that
+                this is no problem at all. (advice: use cpu, anyway)
+        """
         #storing for convenience and explicitness
         self.n_values=n_values
         self.n_attributes=n_attributes
         
         data = recursive_cartesian(*[np.arange(n_values) for _ in range(n_attributes)])
+        
         # one-hot encode and sort such that value 0 is most frequent overall (value 1 second most frequent and so on)
         self.dataset = torch.nn.functional.one_hot(data.long())[torch.sort((data+0.1).prod(dim=-1)).indices].flatten(start_dim=-2).float().to(device)
+        
         # stores zipf distribution as probality list over all actual items
         normalization = sum([zipf_distribution(val+1) for val in range(len(self.dataset))])
         self.distribution = [zipf_distribution(val+1)/normalization for val in range(len(self.dataset))]
@@ -55,7 +73,7 @@ class Dataloader:
             if i==samplesize:
                 break
         if index:
-            plt.plot(np.arange(len(counts)), counts.values())#np.arange(1, len(self)+1), counts.values())
+            plt.plot(np.arange(len(counts)), counts.values())
             plt.show()
         else:
             plt.plot(np.arange(len(counts))[:7], list(counts.values())[:7])#np.arange(1, len(self)+1), counts.values())
@@ -67,6 +85,7 @@ class Dataloader:
         
     def get_index(self, x):
         raise NotImplemented#would work, if dataset was ordered differently (this assumes that position of value plays a role, like in integers. but actually amount of value occurence is the first sorting criterion an position only the secon if at all, not sure right now
+        
         x = x.reshape(self.n_attributes,self.n_values)
         return sum([np.argmax(x[-i-1])*self.n_values**i for i in range(self.n_attributes)])
         
