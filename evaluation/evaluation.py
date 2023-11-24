@@ -108,7 +108,7 @@ def evaluate(alphabet_size, dataset, agents, reference_distributions = [OptimalC
         with open("dump/"+str(name)+".json", "rt") as file:
             config=json.load(file)
             
-        the_class = re.match(r".*'.*agents.(.*)'", config["Agent"])[1]#"<class 'training.agents.SRGSPolicyNet'>")[1]
+        the_class = re.match(r".*'.*agents.(.*)'", config["Agent"])[1]
 
         agent=eval(the_class)(config["N_ATTRIBUTES"]*config["N_VALUES"], (config["MESSAGE_LENGTH"], config["ALPHABET_SIZE"]), (config["N_ATTRIBUTES"], config["N_VALUES"]))
         agent.load_state_dict(torch.load("dump/"+str(name)+".pt", map_location=torch.device(device)).state_dict())
@@ -118,15 +118,15 @@ def evaluate(alphabet_size, dataset, agents, reference_distributions = [OptimalC
         if "fix" in condition:
             messages = np.zeros((len(dataset.dataset), len(agent.message)))
             for i in range(len(messages)):
-                #state=torch.from_numpy(dataset.dataset[i].flatten())
-                #state=state.type(torch.float).to(device)
-                #performing one forwar pass stores the respective message, should be changed so that forward directly returns message (required for aux loss anyways)
+                #performing one forward pass stores the respective message
                 agent(dataset.dataset[i])
                 messages[i]=agent.message.cpu().detach().argmax(dim=-1)
                 if not i%200:
                     print(messages[i])
                 
-            no_comm=0#np.argmax(np.bincount(messages.flatten().astype("int")))
+            no_comm=np.argmax(np.bincount(messages.flatten().astype("int")))
+            #no_comm=0
+            
             print(f"agent {agent.__class__.__name__} no_comm: {no_comm}")
             print(np.bincount(messages.flatten().astype("int"), minlength=config["ALPHABET_SIZE"]))
             for i in range(len(messages)):
@@ -138,6 +138,12 @@ def evaluate(alphabet_size, dataset, agents, reference_distributions = [OptimalC
     plt.show()   
     
 def succes_per_target(alphabet_size, dataset, agents, avg_window=10, condition="fixed lenght", device="cpu", classification=True):
+    """
+    Check out if any specific input (probably the most frequent one) performs
+    better than others. Turns out, that the model tends to rather learn the
+    prior likelihood of the most frequent input than the conditional
+    probability of each input given the messages, if there is aux losses...
+    """
     #todo: assertions for same shape of messages
         
     for name in agents:
@@ -156,16 +162,14 @@ def succes_per_target(alphabet_size, dataset, agents, avg_window=10, condition="
         
         if "fix" in condition:
             
-            if classification:#check for classification"SR" in config["Agent"]:
+            if classification:#todo: instead check for classification"SR" in config["Agent"]:
                 answers = np.zeros(len(dataset.dataset))
             else:
                 answers = np.zeros((len(dataset.dataset), dataset.n_attributes))
                 
                 
             for i in range(len(answers)):
-                #state=torch.from_numpy(dataset.dataset[i].flatten())
-                #state=state.type(torch.float).to(device)
-                #performing one forwar pass stores the respective message, should be changed so that forward directly returns message (required for aux loss anyways)
+                #performing one forward pass stores the respective message
                 answer=agent(dataset.dataset[i])
                 
                 answers[i]=answer.cpu().detach().argmax(dim=-1)
@@ -177,9 +181,10 @@ def succes_per_target(alphabet_size, dataset, agents, avg_window=10, condition="
                     successes[i]=torch.all(torch.nn.functional.one_hot(torch.from_numpy(answers[i]).long(), num_classes=dataset.n_values)==dataset.dataset[i].view((dataset.n_attributes, dataset.n_values)))
                     
                 answer_counts[np.argmax(np_dset==answer)]+=1
+                
+                #print some example messages for subjective evaluation
                 if not i%200:
                     print(answers[i])
-                
             
             print(f"agent {agent.__class__.__name__} max_out: {np.argmax(answer_counts)}")
         
