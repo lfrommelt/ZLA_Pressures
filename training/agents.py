@@ -41,7 +41,7 @@ class Agent(ABC):
         """
         pass
 
-# todo: we need some architecture where sender and receiver are "connected" by gumbel-softmax. See Docstring for SRPolicyNet for details.
+
 class GSPolicyNetLSTM(torch.nn.Module):
     #todo: implement eval mode/forward for inference
     # !!!the assholes from paper did actually frame the reconstruction problem as classification problem!!! Is zero-shot generalization due to compositionality even possible then???
@@ -53,7 +53,6 @@ class GSPolicyNetLSTM(torch.nn.Module):
         self.out_shape=out_shape
         self.in_shape = in_shape
         self.classification=classification
-        #self.gs = lambda x: torch.nn.functional.gumbel_softmax(x, tau=1, hard=True, eps=1e-10, dim=-1)# can not be serialized that way...
         
         self.message = np.zeros(message_shape[0])
         
@@ -64,7 +63,7 @@ class GSPolicyNetLSTM(torch.nn.Module):
         self.relu1 = torch.nn.ReLU()
         
         # freakin torch is a total shitshow!!! They give the option for a automatic projection for hidden states -> output, but then overwrite the hidden with this projection and not just the output!!?! So in the end we have to do the projection ourself, in order to access the hidden values. dafuq. stuff like this costs hours just to realize....
-        self.rnn1 = torch.nn.LSTM(message_shape[1], self.sender_hidden, num_layers=1, proj_size=0)#message_shape[1])
+        self.rnn1 = torch.nn.LSTM(message_shape[1], self.sender_hidden, num_layers=1, proj_size=0)
         
         
         self.sos = torch.zeros(message_shape[1]) #not part of alphabet
@@ -73,11 +72,11 @@ class GSPolicyNetLSTM(torch.nn.Module):
         
         self.projection = torch.nn.Linear(self.sender_hidden, message_shape[1])
         
-        #linear layer sizes are completely arbitrary... (gotta be < receiver hidden in this case
+        #linear layer sizes are completely arbitrary... (should be <= receiver hidden in this case
         out_linear_hidden_size=self.receiver_hidden#int(receiver_hidden/2)
         self.h0=torch.zeros(out_linear_hidden_size)
         
-        self.rnn2= torch.nn.LSTM(message_shape[1], self.receiver_hidden, num_layers=1)#, proj_size=out_linear_hidden_size)
+        self.rnn2= torch.nn.LSTM(message_shape[1], self.receiver_hidden, num_layers=1)
         if classification:
             self.receiver2 = torch.nn.Linear(out_linear_hidden_size, out_shape[1]**out_shape[0])# here we could actually use torch.lstm projection instead
         else:
@@ -92,7 +91,7 @@ class GSPolicyNetLSTM(torch.nn.Module):
         '''
         torch gs doku: logits (Tensor) – […, num_features] unnormalized log probabilities
         wtf! logits do not have to be probs. unnormalized probs do not exist. log probs could be normalize in theory (never heard of it, though...)
-        I guess the safest thing would be to use softmax(actual_logits aka x3).log() as input for gs. However using x3 as input did work (nans!)
+        I guess the safest thing would be to use softmax(actual_logits aka x3).log() as input for gs. However using x3 as input did work (still nans!)
         '''
         #.unsqueeze(0) for adding sequence dimension with size 1 (we have to do the recurrency part ourselves
         output, (hn, cn) = self.rnn1(self.sos.unsqueeze(0), (x2.unsqueeze(0), self.c0.unsqueeze(0)))
@@ -122,9 +121,6 @@ class GSPolicyNetLSTM(torch.nn.Module):
         soft_message=[soft]
         while not torch.all(symbol==self.eos):
             if len(symbols)==self.message_shape[0]-1:
-                #symbols.append(self.eos)#hm, this is a constant in case of len=max_len, but a differentiable tensor in other cases...
-                
-                #soft_message.append(soft)#test: are gradients sufficient if we just assume eos was sampled under the respecive (probably unlikely) prob?
                 
                 output, (hn, cn) = self.rnn1(symbols[-1].unsqueeze(0), (hn, cn))
                 output = self.projection(hn)
@@ -145,6 +141,8 @@ class GSPolicyNetLSTM(torch.nn.Module):
                     if nans > 10:
                         break
                 
+                #symbols.append(self.eos)#hm, this is a constant in case of len=max_len, but a differentiable tensor in other cases...
+                #test: are gradients sufficient if we just assume eos was sampled under the respecive (probably unlikely) prob?
                 symbols.append(self.eos)
                 soft_message.append(soft)
                 break
@@ -176,11 +174,10 @@ class GSPolicyNetLSTM(torch.nn.Module):
         self.message_probs=torch.stack(soft_message)
         message = torch.stack(symbols)#.detach()
         self.message = message.detach()
-        #print("message:",*self.message,sep="\n")
         
-        #luckily for Listener we do not need to do the recursion ourselves
+        #luckily, for Listener we do not need to do the recursion ourselves
         _, (x5, _) = self.rnn2(message,(self.h0.unsqueeze(0), torch.zeros(self.receiver_hidden).unsqueeze(0)))
-        x6 = self.receiver2(x5)#we use the batch dim as dim for n_attributes, if fails try with different weights per attribute
+        x6 = self.receiver2(x5)
         
         if self.classification:
             x7 = self.softmax(x6)[0]#why even use RL at all? We could just use gs for the receiver output as well...
@@ -194,7 +191,6 @@ class GSPolicyNetLSTM(torch.nn.Module):
         return str(self.__class__)
     
 class Speaker(torch.nn.Module):
-    #todo: implement
         
     def __init__(self, in_shape, message_shape, out_shape, device="cpu", hidden1=100, hidden2=100):
         super().__init__()
@@ -219,14 +215,13 @@ class Speaker(torch.nn.Module):
         soft = self.softmax(x3.view(self.message_shape))
         
         self.message_probs=soft
-        #print(torch.argmax(soft.view(self.message_shape),dim=-1))
+
         #make hard
         self.message = torch.nn.functional.one_hot(torch.argmax(soft,dim=-1),num_classes=self.message_shape[1]).float()
 
         return self.message
     
 class Listener(torch.nn.Module):
-        #todo: implement
         
     def __init__(self, in_shape, message_shape, out_shape, device="cpu", hidden1=100, hidden2=100, classification=False):
         super().__init__()
@@ -254,9 +249,7 @@ class Listener(torch.nn.Module):
             
         return x7
     
-# todo: we need some architecture where sender and receiver are "connected" by gumbel-softmax. See Docstring for SRPolicyNet for details.
 class SRPolicyNet(torch.nn.Module):
-    #todo: implement
         
     def __init__(self, in_shape, message_shape, out_shape, device="cpu", hidden1=100, hidden2=100, classification=False):
         super().__init__()
@@ -277,9 +270,7 @@ class SRPolicyNet(torch.nn.Module):
         return str(self.__class__)
     
     
-# todo: we need some architecture where sender and receiver are "connected" by gumbel-softmax. See Docstring for SRPolicyNet for details.
 class GSPolicyNet(torch.nn.Module):
-    #todo: implement
         
     def __init__(self, in_shape, message_shape, out_shape, device="cpu", hidden1=100, hidden2=100, classification=False):
         super().__init__()
@@ -306,7 +297,8 @@ class GSPolicyNet(torch.nn.Module):
         x1 = self.sender1(x)
         x2 = self.relu1(x1)
         #why isit so extremely unstable????
-        x3 = self.sender2(x2).view((-1,*self.message_shape))#self.softmax(self.sender2(x2).view((-1,*self.message_shape)))#make probs out of it
+        x3 = self.sender2(x2).view((-1,*self.message_shape))#logits
+        #x3 = self.softmax(self.sender2(x3).view((-1,*self.message_shape)))#make probs out of it
         #x3 = torch.log(x3)#log_probs
         self.message_logits=x3.clone().view((-1,*self.message_shape))
         '''
@@ -355,12 +347,8 @@ class GSPolicyNet(torch.nn.Module):
 """
 class SRPolicyNet(torch.nn.Module):
     '''
-    Sender-Receiver-Policy-Net
-    So far this architecture works for both, sender and receiver, by using the receiver param. It could make sense to:
-    A) Restructure so that the whole agent is one class, same interface as with gumbel-softmax
-    B) Leave it like this, inconsistent interface between gs and this
-    or
-    C) Ignore because in the end we will probably use gs
+    Sender-Receiver-Policy-Net, meant for both sender and receiver,
+    respectively. legacy...
     '''
 
         
