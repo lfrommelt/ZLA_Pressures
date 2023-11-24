@@ -57,7 +57,7 @@ class Dataloader:
         if index:
             plt.plot(np.arange(len(counts)), counts.values())#np.arange(1, len(self)+1), counts.values())
             plt.show()
-        if True:
+        else:
             plt.plot(np.arange(len(counts))[:7], list(counts.values())[:7])#np.arange(1, len(self)+1), counts.values())
             plt.xticks(np.arange(len(counts))[:7], labels=[str(list(self.dataset[i].reshape((self.n_attributes,self.n_values)).argmax(axis=1).numpy())) for i in range(len(self))][:7])
         if show:
