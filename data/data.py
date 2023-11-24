@@ -48,16 +48,23 @@ class Dataloader:
         else:
             return self.dataset[i]
     
-    def plot(self, samplesize=10000):
+    def plot(self, samplesize=10000, index=True, show=True):
         counts={str(datum):0 for datum in self.dataset}#indices of data are sufficient
         for i, datum in enumerate(self.sampler()):
             counts[str(datum)]+=1
             if i==samplesize:
                 break
-
-        plt.plot(np.arange(1, len(self)+1), counts.values())
-        plt.show()
-
+        if index:
+            plt.plot(np.arange(len(counts)), counts.values())#np.arange(1, len(self)+1), counts.values())
+            plt.show()
+        if True:
+            plt.plot(np.arange(len(counts))[:7], list(counts.values())[:7])#np.arange(1, len(self)+1), counts.values())
+            plt.xticks(np.arange(len(counts))[:7], labels=[str(list(self.dataset[i].reshape((self.n_attributes,self.n_values)).argmax(axis=1).numpy())) for i in range(len(self))][:7])
+        if show:
+            plt.show()
+        else:
+            return plt
+        
     def get_index(self, x):
         raise NotImplemented#would work, if dataset was ordered differently (this assumes that position of value plays a role, like in integers. but actually amount of value occurence is the first sorting criterion an position only the secon if at all, not sure right now
         x = x.reshape(self.n_attributes,self.n_values)
@@ -68,8 +75,7 @@ class Dataset:
     '''
     Note: deprecated by Dataloader
     Class responsible for creating and holding a dataset. Aditionally meant to provide test-train split and 
-    all that ML stuff. NOT finetuned for memory, just loads all of it into ram at creation, so don't make it
-    too big...
+    all that ML stuff. NOT finetuned for memory, just loads all of it into ram at creation.
     '''
     def __init__(self, n_attributes, n_values, distribution = "local_values", distribution_param=1.0, data_size_scale=10):
         """
